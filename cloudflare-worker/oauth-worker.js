@@ -57,17 +57,37 @@ function githubHeaders(env) {
 
 async function fetchMetaIndexFromGitHub(env) {
   const { owner, repo, branch } = getRepoConfig(env);
-  const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+  const metaPaths = await (async () => {
+    const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat`;
+    const jsdRes = await fetch(jsdUrl);
 
-  const treeRes = await fetch(treeUrl, { headers: githubHeaders(env) });
-  if (!treeRes.ok) {
-    throw new Error(`Tree API error: ${treeRes.status}`);
-  }
+    if (jsdRes.ok) {
+      const flat = await jsdRes.json();
+      const files = Array.isArray(flat.files) ? flat.files : [];
+      const paths = files
+        .map((file) => file.name)
+        .filter((name) => typeof name === 'string' && name.startsWith('/meta/') && name.endsWith('.json'))
+        .map((name) => name.slice(1));
 
-  const tree = await treeRes.json();
-  const metaPaths = (tree.tree || [])
-    .filter((item) => item.type === 'blob' && item.path.startsWith('meta/') && item.path.endsWith('.json'))
-    .map((item) => item.path);
+      if (paths.length > 0) {
+        return paths;
+      }
+    }
+
+    const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+    const treeRes = await fetch(treeUrl, { headers: githubHeaders(env) });
+    if (!treeRes.ok) {
+      if (treeRes.status === 403) {
+        throw new Error('Tree API error: 403 (rate-limited). Set GITHUB_API_TOKEN in Worker secrets.');
+      }
+      throw new Error(`Tree API error: ${treeRes.status}`);
+    }
+
+    const tree = await treeRes.json();
+    return (tree.tree || [])
+      .filter((item) => item.type === 'blob' && item.path.startsWith('meta/') && item.path.endsWith('.json'))
+      .map((item) => item.path);
+  })();
 
   const baseCdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}`;
   const chunks = [];
