@@ -18,27 +18,116 @@ interface RepoFile<T> {
   sha: string;
 }
 
+interface TreeItem {
+  path: string;
+  type: string;
+  sha: string;
+}
+
+interface TreeResponse {
+  tree: TreeItem[];
+  truncated: boolean;
+}
+
+/** Fields kept in meta/{id}.json — everything needed for list + search, no heavy content */
+type NoteMeta = Pick<
+  Note,
+  'id' | 'type' | 'category' | 'title' | 'language' | 'tags' | 'createdAt' | 'updatedAt'
+> & {
+  preview: string;   // first 200 chars of question / problem / blog content
+  languages: string[]; // all languages across solutions array
+};
+
+const META_BATCH = 12; // parallel CDN fetches per batch
+
 /**
- * Storage backend that reads/writes:
- *   - index.json       (lightweight note summaries for list view)
- *   - notes/{id}.json  (full note body, loaded on demand)
+ * Scalable storage backend using the GitHub Tree API:
  *
- * Public read:  works without a token (jsDelivr CDN)
- * Writes:       require a GitHub token with at least repo:write scope
+ *   meta/{id}.json   ← lightweight summary (~400B), fetched in parallel batches
+ *   notes/{id}.json  ← full note body, fetched only when opening a note
+ *
+ * Public read:  jsDelivr CDN (fast, globally cached)
+ * Writes:       GitHub Contents API (requires token with repo:write)
+ *
+ * No shared mutable index file → no race conditions, scales to any note count.
+ * Backward compatible: falls back to legacy index.json / notes.json if meta/ is absent.
  */
 export class GitHubStorageService implements IStorageService {
   private apiBase = 'https://api.github.com';
   private cdnBase = 'https://cdn.jsdelivr.net/gh';
-  private indexPath = 'index.json';
+  private metaDir = 'meta';
   private notesDir = 'notes';
-  private legacyPath = 'notes.json';
+  // legacy paths kept for read-only fallback
+  private legacyIndexPath = 'index.json';
+  private legacyNotesPath = 'notes.json';
   private cfg: GitHubStorageConfig;
 
   constructor(cfg: GitHubStorageConfig) {
     this.cfg = cfg;
   }
 
-  // ── helpers ──────────────────────────────────────────────────────────────
+  // ── encoding ─────────────────────────────────────────────────────────────
+
+  private decode(encoded: string): string {
+    return decodeURIComponent(escape(atob(encoded.replace(/\n/g, ''))));
+  }
+
+  private encode(content: string): string {
+    return btoa(unescape(encodeURIComponent(content)));
+  }
+
+  // ── paths ─────────────────────────────────────────────────────────────────
+
+  private metaPath(id: string) { return `${this.metaDir}/${id}.json`; }
+  private notePath(id: string) { return `${this.notesDir}/${id}.json`; }
+
+  // ── meta helper ───────────────────────────────────────────────────────────
+
+  private toMeta(note: Note): NoteMeta {
+    const preview =
+      note.question?.slice(0, 200) ??
+      note.problem?.slice(0, 200) ??
+      note.content?.slice(0, 200) ??
+      '';
+
+    const languages: string[] = note.solutions
+      ? note.solutions.map((s) => s.language)
+      : note.language
+      ? [note.language]
+      : [];
+
+    return {
+      id: note.id,
+      type: note.type,
+      category: note.category,
+      title: note.title,
+      language: note.language,
+      languages,
+      tags: note.tags,
+      preview,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    };
+  }
+
+  private metaToNote(meta: NoteMeta): Note {
+    return {
+      id: meta.id,
+      type: meta.type,
+      category: meta.category,
+      title: meta.title,
+      language: meta.language,
+      tags: meta.tags,
+      createdAt: meta.createdAt,
+      updatedAt: meta.updatedAt,
+      // content fields are empty in meta — will be loaded on demand via getNote()
+      question: meta.preview,
+      problem: meta.type === 'coding' ? meta.preview : undefined,
+      solutions: meta.languages.map((l) => ({ language: l, solution: '' })),
+    };
+  }
+
+  // ── auth headers ──────────────────────────────────────────────────────────
 
   private authHeaders(extra: Record<string, string> = {}): HeadersInit {
     const h: Record<string, string> = {
@@ -46,73 +135,38 @@ export class GitHubStorageService implements IStorageService {
       'X-GitHub-Api-Version': '2022-11-28',
       ...extra,
     };
-    if (this.cfg.token) {
-      h['Authorization'] = `Bearer ${this.cfg.token}`;
-    }
+    if (this.cfg.token) h['Authorization'] = `Bearer ${this.cfg.token}`;
     return h;
   }
 
-  private decodeContent(encoded: string): string {
-    return decodeURIComponent(escape(atob(encoded.replace(/\n/g, ''))));
-  }
+  // ── low-level GitHub API calls ────────────────────────────────────────────
 
-  private encodeContent(content: string): string {
-    return btoa(unescape(encodeURIComponent(content)));
-  }
-
-  private getNotePath(id: string): string {
-    return `${this.notesDir}/${id}.json`;
-  }
-
-  private toIndexNote(note: Note): Note {
-    return {
-      id: note.id,
-      type: note.type,
-      category: note.category,
-      title: note.title,
-      question: note.question,
-      problem: note.problem,
-      content: note.type === 'blog' ? note.content?.slice(0, 180) : undefined,
-      answer: undefined,
-      solution: undefined,
-      language: note.language,
-      solutions: note.solutions?.map((item) => ({ language: item.language, solution: '' })),
-      tags: note.tags,
-      createdAt: note.createdAt,
-      updatedAt: note.updatedAt,
-    };
-  }
-
-  private async getFileViaApi<T>(path: string): Promise<RepoFile<T> | null> {
+  private async apiGet<T>(path: string): Promise<RepoFile<T> | null> {
     const url = `${this.apiBase}/repos/${this.cfg.owner}/${this.cfg.repo}/contents/${path}?ref=${this.cfg.branch}`;
     const res = await fetch(url, { headers: this.authHeaders() });
-
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`GitHub API error ${res.status}`);
-
-    const data: GitHubFileResponse = await res.json();
-    return { data: JSON.parse(this.decodeContent(data.content)) as T, sha: data.sha };
+    if (!res.ok) throw new Error(`GitHub API error ${res.status} on ${path}`);
+    const file: GitHubFileResponse = await res.json();
+    return { data: JSON.parse(this.decode(file.content)) as T, sha: file.sha };
   }
 
-  private async getFilePublic<T>(path: string): Promise<T | null> {
+  private async cdnGet<T>(path: string): Promise<T | null> {
+    // Add a cache-bust only for meta (fresh data); notes are immutable until edited
     const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@${this.cfg.branch}/${path}`;
     const res = await fetch(url);
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status}`);
+    if (!res.ok) throw new Error(`CDN fetch error ${res.status} on ${path}`);
     return res.json() as Promise<T>;
   }
 
   private async putFile(path: string, data: unknown, sha: string, message: string): Promise<void> {
     if (!this.cfg.token) throw new Error('Not authenticated');
-
     const body: Record<string, unknown> = {
       message,
-      content: this.encodeContent(JSON.stringify(data, null, 2)),
+      content: this.encode(JSON.stringify(data, null, 2)),
       branch: this.cfg.branch,
     };
-    if (sha) {
-      body.sha = sha;
-    }
+    if (sha) body.sha = sha;
 
     const res = await fetch(
       `${this.apiBase}/repos/${this.cfg.owner}/${this.cfg.repo}/contents/${path}`,
@@ -120,76 +174,99 @@ export class GitHubStorageService implements IStorageService {
         method: 'PUT',
         headers: this.authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
-      }
+      },
     );
-
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error((err as { message?: string }).message || `GitHub write error ${res.status}`);
+      throw new Error((err as { message?: string }).message ?? `GitHub write error ${res.status}`);
     }
   }
 
   private async deleteFile(path: string, sha: string, message: string): Promise<void> {
     if (!this.cfg.token) throw new Error('Not authenticated');
-
-    const body = {
-      message,
-      sha,
-      branch: this.cfg.branch,
-    };
-
     const res = await fetch(
       `${this.apiBase}/repos/${this.cfg.owner}/${this.cfg.repo}/contents/${path}`,
       {
         method: 'DELETE',
         headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body),
-      }
+        body: JSON.stringify({ message, sha, branch: this.cfg.branch }),
+      },
     );
-
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error((err as { message?: string }).message || `GitHub write error ${res.status}`);
+      throw new Error((err as { message?: string }).message ?? `GitHub delete error ${res.status}`);
     }
   }
 
-  private async getIndex(): Promise<RepoFile<Note[]>> {
-    if (this.cfg.token) {
-      const apiIndex = await this.getFileViaApi<Note[]>(this.indexPath);
-      if (apiIndex) {
-        return apiIndex;
-      }
+  // ── Tree API ──────────────────────────────────────────────────────────────
 
-      const legacy = await this.getFileViaApi<Note[]>(this.legacyPath);
-      if (legacy) {
-        return { data: legacy.data.map((note) => this.toIndexNote(note)), sha: '' };
-      }
+  /**
+   * Returns all note IDs by listing meta/ via the Git Tree API.
+   * One API call regardless of how many notes exist.
+   */
+  private async getMetaIds(): Promise<string[]> {
+    const url = `${this.apiBase}/repos/${this.cfg.owner}/${this.cfg.repo}/git/trees/${this.cfg.branch}?recursive=1`;
+    const res = await fetch(url, { headers: this.authHeaders() });
+    if (!res.ok) throw new Error(`Tree API error ${res.status}`);
+    const tree: TreeResponse = await res.json();
 
-      return { data: [], sha: '' };
-    }
-
-    const publicIndex = await this.getFilePublic<Note[]>(this.indexPath);
-    if (publicIndex) {
-      return { data: publicIndex, sha: '' };
-    }
-
-    const legacy = await this.getFilePublic<Note[]>(this.legacyPath);
-    if (legacy) {
-      return { data: legacy.map((note) => this.toIndexNote(note)), sha: '' };
-    }
-
-    return { data: [], sha: '' };
+    return tree.tree
+      .filter((item) => item.type === 'blob' && item.path.startsWith(`${this.metaDir}/`) && item.path.endsWith('.json'))
+      .map((item) => item.path.replace(`${this.metaDir}/`, '').replace('.json', ''));
   }
 
-  private async getFullNoteFile(id: string): Promise<RepoFile<Note> | null> {
-    const path = this.getNotePath(id);
+  /** Fetch all meta files in parallel batches, return as Note stubs */
+  private async fetchAllMeta(ids: string[]): Promise<Note[]> {
+    const results: Note[] = [];
 
-    if (this.cfg.token) {
-      return this.getFileViaApi<Note>(path);
+    for (let i = 0; i < ids.length; i += META_BATCH) {
+      const batch = ids.slice(i, i + META_BATCH);
+      const fetched = await Promise.all(
+        batch.map(async (id) => {
+          try {
+            const meta = this.cfg.token
+              ? await this.apiGet<NoteMeta>(this.metaPath(id))
+              : await this.cdnGet<NoteMeta>(this.metaPath(id));
+            return meta ? (this.cfg.token ? (meta as RepoFile<NoteMeta>).data : meta as NoteMeta) : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const m of fetched) {
+        if (m) results.push(this.metaToNote(m as NoteMeta));
+      }
     }
 
-    const data = await this.getFilePublic<Note>(path);
-    return data ? { data, sha: '' } : null;
+    return results.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /** Get SHA of an existing meta file (needed for updates/deletes via API) */
+  private async getMetaSha(id: string): Promise<string> {
+    const file = await this.apiGet<NoteMeta>(this.metaPath(id));
+    return file?.sha ?? '';
+  }
+
+  private async getNoteSha(id: string): Promise<string> {
+    const file = await this.apiGet<Note>(this.notePath(id));
+    return file?.sha ?? '';
+  }
+
+  // ── legacy fallback ───────────────────────────────────────────────────────
+
+  private async legacyFallbackNotes(): Promise<Note[]> {
+    // Try new index.json first, then old notes.json
+    const tryIndex = this.cfg.token
+      ? await this.apiGet<Note[]>(this.legacyIndexPath)
+      : await this.cdnGet<Note[]>(this.legacyIndexPath);
+    if (tryIndex) return this.cfg.token ? (tryIndex as RepoFile<Note[]>).data : tryIndex as Note[];
+
+    const tryNotes = this.cfg.token
+      ? await this.apiGet<Note[]>(this.legacyNotesPath)
+      : await this.cdnGet<Note[]>(this.legacyNotesPath);
+    if (tryNotes) return this.cfg.token ? (tryNotes as RepoFile<Note[]>).data : tryNotes as Note[];
+
+    return [];
   }
 
   private generateId(): string {
@@ -199,75 +276,69 @@ export class GitHubStorageService implements IStorageService {
   // ── IStorageService ───────────────────────────────────────────────────────
 
   async getNotes(): Promise<Note[]> {
-    const { data } = await this.getIndex();
-    return data;
+    const ids = await this.getMetaIds().catch(() => [] as string[]);
+    if (ids.length > 0) return this.fetchAllMeta(ids);
+    // fall back gracefully to legacy layout
+    return this.legacyFallbackNotes();
   }
 
   async getNote(id: string): Promise<Note | null> {
-    const fullNote = await this.getFullNoteFile(id);
-    if (fullNote) {
-      return fullNote.data;
-    }
+    // Always fetch the full note file
+    const full = this.cfg.token
+      ? await this.apiGet<Note>(this.notePath(id))
+      : await this.cdnGet<Note>(this.notePath(id));
 
-    if (this.cfg.token) {
-      const legacy = await this.getFileViaApi<Note[]>(this.legacyPath);
-      return legacy?.data.find((n) => n.id === id) ?? null;
-    }
+    if (full) return this.cfg.token ? (full as RepoFile<Note>).data : full as Note;
 
-    const legacy = await this.getFilePublic<Note[]>(this.legacyPath);
-    return legacy?.find((n) => n.id === id) ?? null;
+    // Legacy fallback: old notes.json
+    const legacy = await this.legacyFallbackNotes();
+    return legacy.find((n) => n.id === id) ?? null;
   }
 
   async createNote(noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>): Promise<Note> {
-    const { data: indexNotes, sha } = await this.getIndex();
     const now = Date.now();
     const note: Note = { ...noteData, id: this.generateId(), createdAt: now, updatedAt: now };
-    const indexEntry = this.toIndexNote(note);
+    const meta = this.toMeta(note);
 
-    await this.putFile(this.getNotePath(note.id), note, '', `add note file: ${note.title}`);
-    await this.putFile(this.indexPath, [...indexNotes, indexEntry], sha, `add note index: ${note.title}`);
+    // Two independent commits — no shared index to corrupt
+    await this.putFile(this.notePath(note.id), note, '', `add note: ${note.title}`);
+    await this.putFile(this.metaPath(note.id), meta, '', `add meta: ${note.title}`);
     return note;
   }
 
   async updateNote(id: string, updates: Partial<Note>): Promise<Note> {
-    const existingFile = await this.getFullNoteFile(id);
-    const { data: indexNotes, sha } = await this.getIndex();
-    const idx = indexNotes.findIndex((n) => n.id === id);
-    if (idx === -1) throw new Error(`Note ${id} not found`);
+    // Fetch current SHA values and base content in parallel
+    const [noteFile, metaSha] = await Promise.all([
+      this.apiGet<Note>(this.notePath(id)),
+      this.getMetaSha(id),
+    ]);
 
-    const baseNote = existingFile?.data ?? await this.getNote(id);
-    if (!baseNote) {
-      throw new Error(`Note ${id} not found`);
-    }
+    const base = noteFile?.data ?? await this.getNote(id);
+    if (!base) throw new Error(`Note ${id} not found`);
 
-    const updated: Note = {
-      ...baseNote,
-      ...updates,
-      id,
-      createdAt: baseNote.createdAt,
-      updatedAt: Date.now(),
-    };
+    const updated: Note = { ...base, ...updates, id, createdAt: base.createdAt, updatedAt: Date.now() };
+    const meta = this.toMeta(updated);
 
-    indexNotes[idx] = this.toIndexNote(updated);
-
-    await this.putFile(this.getNotePath(id), updated, existingFile?.sha ?? '', `update note file: ${updated.title}`);
-    await this.putFile(this.indexPath, indexNotes, sha, `update note index: ${updated.title}`);
+    await this.putFile(this.notePath(id), updated, noteFile?.sha ?? '', `update note: ${updated.title}`);
+    await this.putFile(this.metaPath(id), meta, metaSha, `update meta: ${updated.title}`);
     return updated;
   }
 
   async deleteNote(id: string): Promise<void> {
-    const existingFile = await this.getFullNoteFile(id);
-    const { data: indexNotes, sha } = await this.getIndex();
-    const note = indexNotes.find((n) => n.id === id);
-    const filtered = indexNotes.filter((n) => n.id !== id);
+    const [noteSha, metaSha] = await Promise.all([
+      this.getNoteSha(id),
+      this.getMetaSha(id),
+    ]);
 
-    if (existingFile?.sha) {
-      await this.deleteFile(this.getNotePath(id), existingFile.sha, `delete note file: ${note?.title ?? id}`);
-    }
-    await this.putFile(this.indexPath, filtered, sha, `delete note index: ${note?.title ?? id}`);
+    const title = (await this.apiGet<Note>(this.notePath(id)))?.data.title ?? id;
+
+    await Promise.all([
+      noteSha ? this.deleteFile(this.notePath(id), noteSha, `delete note: ${title}`) : Promise.resolve(),
+      metaSha ? this.deleteFile(this.metaPath(id), metaSha, `delete meta: ${title}`) : Promise.resolve(),
+    ]);
   }
 
-  // ── Folder stubs (not used in current UI) ────────────────────────────────
+  // ── Folder stubs ──────────────────────────────────────────────────────────
   async getFolders(): Promise<Folder[]> { return []; }
   async getFolder(_id: string): Promise<null> { return null; }
   async createFolder(): Promise<never> { throw new Error('Not supported'); }

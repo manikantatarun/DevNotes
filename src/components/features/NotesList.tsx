@@ -1,5 +1,5 @@
 import { useNotes } from '../../hooks/useNotes';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
@@ -17,7 +17,20 @@ export function NotesList() {
   const [openingNoteId, setOpeningNoteId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<NoteType | 'all'>('all');
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
+  const [filterLanguage, setFilterLanguage] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Derive the set of languages across all notes (for the language dropdown)
+  const availableLanguages = useMemo(() => {
+    const langs = new Set<string>();
+    for (const note of notes) {
+      if (note.language) langs.add(note.language);
+      for (const s of note.solutions ?? []) {
+        if (s.language) langs.add(s.language);
+      }
+    }
+    return [...langs].sort();
+  }, [notes]);
 
   const handleCreateNote = async (noteData: any) => {
     try {
@@ -29,10 +42,7 @@ export function NotesList() {
   };
 
   const handleUpdateNote = async (noteData: any) => {
-    if (!editingNote) {
-      return;
-    }
-
+    if (!editingNote) return;
     try {
       const updated = await updateNote(editingNote.id, noteData);
       setShowForm(false);
@@ -56,15 +66,53 @@ export function NotesList() {
     }
   };
 
-  const filteredNotes = notes.filter(note => {
-    const matchesType = filterType === 'all' || note.type === filterType;
-    const matchesCategory = filterCategory === 'all' || note.category === filterCategory;
-    const matchesSearch = !searchTerm || 
-      note.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      note.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
-    
-    return matchesType && matchesCategory && matchesSearch;
-  });
+  const filteredNotes = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+
+    return notes.filter((note) => {
+      // ── filter by type ────────────────────────────────────────────────────
+      if (filterType !== 'all' && note.type !== filterType) return false;
+
+      // ── filter by category ────────────────────────────────────────────────
+      if (filterCategory !== 'all' && note.category !== filterCategory) return false;
+
+      // ── filter by language ────────────────────────────────────────────────
+      if (filterLanguage !== 'all') {
+        const noteLangs = [
+          note.language,
+          ...(note.solutions ?? []).map((s) => s.language),
+        ].filter(Boolean);
+        if (!noteLangs.includes(filterLanguage)) return false;
+      }
+
+      // ── full-text search ──────────────────────────────────────────────────
+      if (term) {
+        const haystack = [
+          note.title,
+          ...(note.tags ?? []),
+          note.question,
+          note.problem,
+          // blog content preview comes through as note.content
+          note.content,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        // support multi-word: every word must appear somewhere
+        const words = term.split(/\s+/);
+        if (!words.every((w) => haystack.includes(w))) return false;
+      }
+
+      return true;
+    });
+  }, [notes, filterType, filterCategory, filterLanguage, searchTerm]);
+
+  const isFiltered =
+    searchTerm.trim() !== '' ||
+    filterType !== 'all' ||
+    filterCategory !== 'all' ||
+    filterLanguage !== 'all';
 
   if (loading) return <div className="notes-container">Loading notes...</div>;
   if (error) return <div className="notes-container error">Error: {error}</div>;
@@ -108,7 +156,7 @@ export function NotesList() {
     <div className="notes-container">
       <div className="notes-header">
         <div className="header-top">
-          <h2>📚 My Notes ({filteredNotes.length})</h2>
+          <h2>📚 My Notes ({filteredNotes.length}{isFiltered ? ` / ${notes.length}` : ''})</h2>
           {hasWriteAccess && (
             <button className="btn-new-note" onClick={() => setShowForm(true)}>
               ➕ New Note
@@ -120,41 +168,74 @@ export function NotesList() {
           <div className="search-box">
             <input
               type="text"
-              placeholder="🔍 Search notes or tags..."
+              placeholder="🔍 Search title, tags, question…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
-          <div className="filter-group">
-            <label>Type:</label>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)}>
-              <option value="all">All Types</option>
-              {NOTE_TYPES.map(type => (
-                <option key={type.value} value={type.value}>
-                  {type.icon} {type.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <div className="filter-row">
+            <div className="filter-group">
+              <label>Type:</label>
+              <select value={filterType} onChange={(e) => setFilterType(e.target.value as NoteType | 'all')}>
+                <option value="all">All Types</option>
+                {NOTE_TYPES.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.icon} {type.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className="filter-group">
-            <label>Category:</label>
-            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value as any)}>
-              <option value="all">All Categories</option>
-              {CATEGORIES.map(cat => (
-                <option key={cat.value} value={cat.value}>
-                  {cat.label}
-                </option>
-              ))}
-            </select>
+            <div className="filter-group">
+              <label>Category:</label>
+              <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value as Category | 'all')}>
+                <option value="all">All Categories</option>
+                {CATEGORIES.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {availableLanguages.length > 0 && (
+              <div className="filter-group">
+                <label>Language:</label>
+                <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)}>
+                  <option value="all">All Languages</option>
+                  {availableLanguages.map((lang) => (
+                    <option key={lang} value={lang}>
+                      {lang}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {isFiltered && (
+              <button
+                className="btn-clear-filters"
+                onClick={() => {
+                  setSearchTerm('');
+                  setFilterType('all');
+                  setFilterCategory('all');
+                  setFilterLanguage('all');
+                }}
+              >
+                ✕ Clear
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {filteredNotes.length === 0 ? (
         <div className="empty-state">
-          <p>📝 No notes found. {searchTerm || filterType !== 'all' || filterCategory !== 'all' ? 'Try adjusting your filters.' : 'Create your first note!'}</p>
+          <p>
+            📝 No notes found.{' '}
+            {isFiltered ? 'Try adjusting your filters.' : 'Create your first note!'}
+          </p>
         </div>
       ) : (
         <div className="notes-grid">

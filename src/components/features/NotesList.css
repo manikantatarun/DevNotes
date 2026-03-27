@@ -45,14 +45,37 @@
 
 .filters {
   display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.search-box {
+  width: 100%;
+}
+
+.filter-row {
+  display: flex;
   gap: 1rem;
   flex-wrap: wrap;
   align-items: flex-end;
 }
 
-.search-box {
-  flex: 1;
-  min-width: 250px;
+.btn-clear-filters {
+  padding: 0.72rem 1.1rem;
+  border-radius: 8px;
+  border: 1.5px solid #555;
+  background: transparent;
+  color: #bbb;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-end;
+  white-space: nowrap;
+}
+
+.btn-clear-filters:hover {
+  border-color: #dc3545;
+  color: #dc3545;
 }
 
 .search-box input {
@@ -110,13 +133,18 @@
   .notes-grid {
     grid-template-columns: 1fr;
   }
-  
-  .filters {
+
+  .filter-row {
     flex-direction: column;
     align-items: stretch;
   }
-  
-  .search-box {
+
+  .filter-group select {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .btn-clear-filters {
     width: 100%;
   }
 }
