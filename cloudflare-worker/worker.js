@@ -73,9 +73,10 @@ function githubHeaders(token) {
   const headers = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'devnotes-worker',
   };
   if (token) {
-    headers.Authorization = `token ${token}`;
+    headers.Authorization = `token ${token.trim()}`;
   }
   return headers;
 }
@@ -101,8 +102,12 @@ function decodeBase64Json(content) {
 function parseAuthToken(request) {
   const auth = request.headers.get('Authorization') || '';
   const match = auth.match(/^(Bearer|token)\s+(.+)$/i);
-  if (!match) return null;
-  return match[2];
+  if (match?.[2]) return match[2].trim();
+
+  const alt = request.headers.get('X-GitHub-Token') || request.headers.get('x-github-token');
+  if (alt) return alt.trim();
+
+  return null;
 }
 
 async function githubGetUser(token) {

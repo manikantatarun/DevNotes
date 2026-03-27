@@ -196,6 +196,7 @@ export class GitHubStorageService implements IStorageService {
 
     if (this.cfg.token) {
       headers.Authorization = `Bearer ${this.cfg.token}`;
+      headers['X-GitHub-Token'] = this.cfg.token;
     }
 
     const res = await fetch(`${this.workerUrl}${path}`, {

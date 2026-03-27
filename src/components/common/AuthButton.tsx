@@ -20,6 +20,7 @@ export function AuthButton() {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          'X-GitHub-Token': token,
         },
       });
 
