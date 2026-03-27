@@ -6,6 +6,7 @@ export interface GitHubStorageConfig {
   repo: string;
   branch: string;
   token?: string;
+  workerUrl?: string;
 }
 
 interface GitHubFileResponse {
@@ -16,6 +17,14 @@ interface GitHubFileResponse {
 interface RepoFile<T> {
   data: T;
   sha: string;
+}
+
+interface WorkerMetaResponse {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  rows: NoteMeta[];
 }
 
 interface TreeItem {
@@ -64,6 +73,10 @@ export class GitHubStorageService implements IStorageService {
 
   constructor(cfg: GitHubStorageConfig) {
     this.cfg = cfg;
+  }
+
+  private get workerUrl(): string {
+    return (this.cfg.workerUrl ?? '').replace(/\/$/, '');
   }
 
   // ── encoding ─────────────────────────────────────────────────────────────
@@ -169,6 +182,50 @@ export class GitHubStorageService implements IStorageService {
 
     const fromApi = await this.apiGet<T>(path);
     return fromApi?.data ?? null;
+  }
+
+  private async workerRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (!this.workerUrl) {
+      throw new Error('Worker URL not configured');
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+    };
+
+    if (this.cfg.token) {
+      headers.Authorization = `Bearer ${this.cfg.token}`;
+    }
+
+    const res = await fetch(`${this.workerUrl}${path}`, {
+      ...init,
+      headers,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string; message?: string }).error ?? (err as { message?: string }).message ?? `Worker error ${res.status}`);
+    }
+
+    return res.json() as Promise<T>;
+  }
+
+  private async getNotesFromWorker(): Promise<Note[]> {
+    const pageSize = 100;
+    const first = await this.workerRequest<WorkerMetaResponse>(`/notes/meta?page=1&pageSize=${pageSize}`, {
+      method: 'GET',
+    });
+
+    let rows = [...first.rows];
+    for (let page = 2; page <= first.totalPages; page += 1) {
+      const next = await this.workerRequest<WorkerMetaResponse>(`/notes/meta?page=${page}&pageSize=${pageSize}`, {
+        method: 'GET',
+      });
+      rows = rows.concat(next.rows);
+    }
+
+    return rows.map((meta) => this.metaToNote(meta));
   }
 
   private async putFile(path: string, data: unknown, sha: string, message: string): Promise<void> {
@@ -281,6 +338,14 @@ export class GitHubStorageService implements IStorageService {
   // ── IStorageService ───────────────────────────────────────────────────────
 
   async getNotes(): Promise<Note[]> {
+    if (this.workerUrl) {
+      try {
+        return await this.getNotesFromWorker();
+      } catch {
+        // fallback to direct GitHub reads
+      }
+    }
+
     const ids = await this.getMetaIds().catch(() => [] as string[]);
     if (ids.length > 0) return this.fetchAllMeta(ids);
     // fall back gracefully to legacy layout
@@ -299,6 +364,18 @@ export class GitHubStorageService implements IStorageService {
   }
 
   async createNote(noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>): Promise<Note> {
+    if (this.workerUrl && this.cfg.token) {
+      try {
+        const response = await this.workerRequest<{ note: Note }>('/notes/create', {
+          method: 'POST',
+          body: JSON.stringify({ note: noteData }),
+        });
+        return response.note;
+      } catch {
+        // fallback to direct GitHub writes
+      }
+    }
+
     const now = Date.now();
     const note: Note = { ...noteData, id: this.generateId(), createdAt: now, updatedAt: now };
     const meta = this.toMeta(note);
@@ -310,6 +387,18 @@ export class GitHubStorageService implements IStorageService {
   }
 
   async updateNote(id: string, updates: Partial<Note>): Promise<Note> {
+    if (this.workerUrl && this.cfg.token) {
+      try {
+        const response = await this.workerRequest<{ note: Note }>('/notes/update', {
+          method: 'POST',
+          body: JSON.stringify({ id, updates }),
+        });
+        return response.note;
+      } catch {
+        // fallback to direct GitHub writes
+      }
+    }
+
     // Fetch current SHA values and base content in parallel
     const [noteFile, metaSha] = await Promise.all([
       this.apiGet<Note>(this.notePath(id)),
@@ -328,6 +417,18 @@ export class GitHubStorageService implements IStorageService {
   }
 
   async deleteNote(id: string): Promise<void> {
+    if (this.workerUrl && this.cfg.token) {
+      try {
+        await this.workerRequest<{ ok: boolean }>('/notes/delete', {
+          method: 'POST',
+          body: JSON.stringify({ id }),
+        });
+        return;
+      } catch {
+        // fallback to direct GitHub writes
+      }
+    }
+
     const [noteSha, metaSha] = await Promise.all([
       this.getNoteSha(id),
       this.getMetaSha(id),

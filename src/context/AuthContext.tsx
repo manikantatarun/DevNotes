@@ -78,6 +78,7 @@ function buildStorageService(token?: string): IStorageService {
     repo: GITHUB_CONFIG.dataRepoName,
     branch: GITHUB_CONFIG.dataRepoBranch,
     token,
+    workerUrl: GITHUB_CONFIG.oauthWorkerUrl,
   });
 }
 

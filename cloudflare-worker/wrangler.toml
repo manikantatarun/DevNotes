@@ -15,3 +15,8 @@ DATA_REPO_BRANCH = "main"
 # npx wrangler secret put GITHUB_CLIENT_SECRET
 # Optional for higher GitHub API rate limits when building /notes/meta index:
 # npx wrangler secret put GITHUB_API_TOKEN
+
+[[kv_namespaces]]
+binding = "META_KV"
+id = "231ac68fcc8945b3b2a792be840c7cc5"
+preview_id = "79255b16a1234e7b85d1843aa22f1eb0"

@@ -149,6 +149,38 @@
   font-size: 0.95rem;
 }
 
+.pagination-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.page-size-control {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.page-size-control label {
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+
+.page-size-control select {
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1.5px solid #444;
+  background: #1f1f1f;
+  color: #e8eaed;
+  font-size: 0.9rem;
+}
+
+.page-size-control select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
 .pagination-actions {
   display: flex;
   align-items: center;
@@ -201,6 +233,10 @@
   .notes-pagination {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .pagination-left {
+    justify-content: space-between;
   }
 
   .pagination-actions {

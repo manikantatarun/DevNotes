@@ -44,7 +44,7 @@ export function NotesList() {
   const [remoteNotes, setRemoteNotes] = useState<Note[] | null>(null);
   const [remoteTotal, setRemoteTotal] = useState<number | null>(null);
   const [remotePage, setRemotePage] = useState(1);
-  const [remotePageSize] = useState(24);
+  const [remotePageSize, setRemotePageSize] = useState(24);
   const [remoteTotalPages, setRemoteTotalPages] = useState(1);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
@@ -386,11 +386,30 @@ export function NotesList() {
         </div>
       )}
 
-      {isRemoteMode && remoteTotalPages > 1 && (
+      {isRemoteMode && remoteTotal !== null && (
         <div className="notes-pagination">
-          <div className="pagination-summary">
-            Showing {remoteRangeStart}-{remoteRangeEnd} of {remoteTotal ?? 0}
+          <div className="pagination-left">
+            <div className="pagination-summary">
+              Showing {remoteRangeStart}-{remoteRangeEnd} of {remoteTotal ?? 0}
+            </div>
+            <div className="page-size-control">
+              <label htmlFor="page-size">Page size:</label>
+              <select
+                id="page-size"
+                value={remotePageSize}
+                onChange={(e) => {
+                  setRemotePageSize(Number(e.target.value));
+                  setRemotePage(1);
+                }}
+              >
+                <option value={12}>12</option>
+                <option value={24}>24</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
           </div>
+
           <div className="pagination-actions">
             <button
               className="btn-page"
