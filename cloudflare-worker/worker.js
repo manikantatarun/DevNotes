@@ -13,7 +13,8 @@
 const CORS = (origin) => ({
   'Access-Control-Allow-Origin': origin,
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-GitHub-Token',
+  'Access-Control-Max-Age': '86400',
 });
 
 const json = (body, status = 200, origin = '*', cacheControl = 'no-store') =>
