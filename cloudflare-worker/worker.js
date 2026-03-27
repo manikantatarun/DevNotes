@@ -75,7 +75,7 @@ function githubHeaders(token) {
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
+    headers.Authorization = `token ${token}`;
   }
   return headers;
 }
@@ -98,18 +98,35 @@ function decodeBase64Json(content) {
   return JSON.parse(decodeURIComponent(escape(atob(content.replace(/\n/g, '')))));
 }
 
-function parseBearerToken(request) {
+function parseAuthToken(request) {
   const auth = request.headers.get('Authorization') || '';
-  const match = auth.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1] : null;
+  const match = auth.match(/^(Bearer|token)\s+(.+)$/i);
+  if (!match) return null;
+  return match[2];
 }
 
 async function githubGetUser(token) {
   const res = await fetch('https://api.github.com/user', {
     headers: githubHeaders(token),
   });
-  if (!res.ok) return null;
-  return res.json();
+
+  if (res.ok) {
+    return res.json();
+  }
+
+  // Fallback for environments expecting Bearer token format
+  if (res.status === 401) {
+    const retry = await fetch('https://api.github.com/user', {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (retry.ok) return retry.json();
+  }
+
+  return null;
 }
 
 async function checkWriteAccess(token, env, userLogin) {
@@ -126,7 +143,7 @@ async function checkWriteAccess(token, env, userLogin) {
 }
 
 async function assertWriteAuthorized(request, env, origin) {
-  const token = parseBearerToken(request);
+  const token = parseAuthToken(request);
   if (!token) {
     return { ok: false, response: json({ error: 'Missing Authorization token' }, 401, origin) };
   }
