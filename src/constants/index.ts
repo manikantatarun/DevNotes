@@ -4,7 +4,6 @@
 
 export const NOTE_TYPES = [
   { value: 'qa', label: 'Q&A', icon: '💬' },
-  { value: 'coding', label: 'Coding', icon: '💻' },
   { value: 'blog', label: 'Blog', icon: '📝' },
 ] as const;
 
@@ -22,23 +21,22 @@ export const CATEGORIES = [
 
 export const PROGRAMMING_LANGUAGES = [
   'javascript',
-  'typescript',
   'python',
   'java',
+  'react',
+  'html',
+  'css',
+  'sql',
+  'bash',
   'cpp',
+  'typescript',
   'csharp',
   'go',
   'rust',
   'php',
   'ruby',
-  'react',
   'swift',
   'kotlin',
-  'html',
-  'css',
-  'sql',
-  'bash',
-  'markdown',
 ] as const;
 
 export const DEFAULT_TAGS = [

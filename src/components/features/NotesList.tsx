@@ -53,10 +53,13 @@ export function NotesList() {
   if (loading) return <div className="notes-container">Loading notes...</div>;
   if (error) return <div className="notes-container error">Error: {error}</div>;
 
+  const allUsedTags = [...new Set(notes.flatMap((n) => n.tags))];
+
   if (showForm) {
     return (
       <NoteForm
         initialNote={editingNote}
+        existingTags={allUsedTags}
         onSubmit={editingNote ? handleUpdateNote : handleCreateNote}
         onCancel={() => {
           setShowForm(false);

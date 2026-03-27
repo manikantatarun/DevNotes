@@ -1,4 +1,6 @@
 import type { Note } from '../../types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { formatDateTime } from '../../utils';
 import './NoteViewer.css';
 
@@ -152,9 +154,9 @@ export function NoteViewer({ note, onClose, onEdit, onDelete }: NoteViewerProps)
 
           {note.type === 'blog' && (
             <div className="blog-content">
-              {note.content?.split('\n').map((paragraph, idx) => (
-                <p key={idx}>{paragraph}</p>
-              ))}
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {note.content || ''}
+              </ReactMarkdown>
             </div>
           )}
         </div>

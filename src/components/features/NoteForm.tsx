@@ -1,4 +1,19 @@
 import { useState } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { java } from '@codemirror/lang-java';
+import { cpp } from '@codemirror/lang-cpp';
+import { rust } from '@codemirror/lang-rust';
+import { go } from '@codemirror/lang-go';
+import { php } from '@codemirror/lang-php';
+import { sql } from '@codemirror/lang-sql';
+import { html } from '@codemirror/lang-html';
+import { css } from '@codemirror/lang-css';
+import { markdown } from '@codemirror/lang-markdown';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { NoteType, Category, Note } from '../../types';
 import { NOTE_TYPES, CATEGORIES, PROGRAMMING_LANGUAGES, DEFAULT_TAGS } from '../../constants';
 import './NoteForm.css';
@@ -7,9 +22,41 @@ interface NoteFormProps {
   onSubmit: (noteData: any) => void;
   onCancel: () => void;
   initialNote?: Note | null;
+  existingTags?: string[];
 }
 
-export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormProps) {
+function getCodeExtensions(language: string) {
+  switch (language.toLowerCase()) {
+    case 'javascript':
+      return [javascript()];
+    case 'typescript':
+      return [javascript({ typescript: true })];
+    case 'python':
+      return [python()];
+    case 'java':
+      return [java()];
+    case 'cpp':
+      return [cpp()];
+    case 'rust':
+      return [rust()];
+    case 'go':
+      return [go()];
+    case 'php':
+      return [php()];
+    case 'sql':
+      return [sql()];
+    case 'html':
+      return [html()];
+    case 'css':
+      return [css()];
+    case 'markdown':
+      return [markdown()];
+    default:
+      return [];
+  }
+}
+
+export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags = [] }: NoteFormProps) {
   const [type, setType] = useState<NoteType>(initialNote?.type ?? 'qa');
   const [category, setCategory] = useState<Category>(initialNote?.category ?? 'general');
   const [title, setTitle] = useState(initialNote?.title ?? '');
@@ -41,7 +88,6 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
   const [content, setContent] = useState(initialNote?.content ?? '');
   const [tags, setTags] = useState<string[]>(initialNote?.tags ?? []);
   const [newTag, setNewTag] = useState('');
-  const visibleNoteTypes = NOTE_TYPES.filter((item) => item.value !== 'coding' || initialNote?.type === 'coding');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +110,11 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
           }))
           .filter((item) => item.language && item.solution);
 
+        if (isCodingCategory && validSolutions.length === 0) {
+          alert('Please add at least one code answer with language and code.');
+          return;
+        }
+
         noteData = {
           ...baseData,
           question,
@@ -81,6 +132,11 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
           }))
           .filter((item) => item.language && item.solution);
 
+        if (validSolutions.length === 0) {
+          alert('Please add at least one code solution with language and code.');
+          return;
+        }
+
         noteData = {
           ...baseData,
           problem,
@@ -91,6 +147,10 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
         break;
       }
       case 'blog':
+        if (!content.trim()) {
+          alert('Please add blog content in markdown.');
+          return;
+        }
         noteData = { ...baseData, content };
         break;
     }
@@ -127,6 +187,60 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
     setCodingSolutions((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const renderCodingSolutionsEditor = (placeholder: string) => (
+    <div className="form-group">
+      <label>Code Answers (multiple languages)</label>
+      <div className="coding-solutions">
+        {codingSolutions.map((item, index) => (
+          <div key={index} className="coding-solution-item">
+            <div className="coding-solution-header">
+              <span className="coding-solution-title">Answer {index + 1}</span>
+              {codingSolutions.length > 1 && (
+                <button
+                  type="button"
+                  className="remove-solution-btn"
+                  onClick={() => removeCodingSolution(index)}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            <select
+              value={item.language}
+              onChange={(e) => updateCodingSolution(index, 'language', e.target.value)}
+              required
+            >
+              {PROGRAMMING_LANGUAGES.map((lang) => (
+                <option key={lang} value={lang}>
+                  {lang}
+                </option>
+              ))}
+            </select>
+            <div className="code-editor-wrapper">
+              <CodeMirror
+                value={item.solution}
+                onChange={(value) => updateCodingSolution(index, 'solution', value)}
+                theme={oneDark}
+                height="260px"
+                extensions={getCodeExtensions(item.language)}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  bracketMatching: true,
+                  highlightActiveLine: true,
+                }}
+                placeholder={placeholder}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <button type="button" className="add-solution-btn" onClick={addCodingSolution}>
+        + Add Another Language
+      </button>
+    </div>
+  );
+
   return (
     <form className="note-form" onSubmit={handleSubmit}>
       <h2>{initialNote ? 'Edit Note' : 'Create New Note'}</h2>
@@ -135,7 +249,7 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
         <div className="form-group">
           <label>Type *</label>
           <div className="type-selector">
-            {visibleNoteTypes.map((t) => (
+            {NOTE_TYPES.map((t) => (
               <button
                 key={t.value}
                 type="button"
@@ -188,49 +302,7 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
           </div>
 
           {category === 'coding' ? (
-            <div className="form-group">
-              <label>Code Answers (multiple languages)</label>
-              <div className="coding-solutions">
-                {codingSolutions.map((item, index) => (
-                  <div key={index} className="coding-solution-item">
-                    <div className="coding-solution-header">
-                      <span className="coding-solution-title">Answer {index + 1}</span>
-                      {codingSolutions.length > 1 && (
-                        <button
-                          type="button"
-                          className="remove-solution-btn"
-                          onClick={() => removeCodingSolution(index)}
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                    <select
-                      value={item.language}
-                      onChange={(e) => updateCodingSolution(index, 'language', e.target.value)}
-                      required
-                    >
-                      {PROGRAMMING_LANGUAGES.map((lang) => (
-                        <option key={lang} value={lang}>
-                          {lang}
-                        </option>
-                      ))}
-                    </select>
-                    <textarea
-                      value={item.solution}
-                      onChange={(e) => updateCodingSolution(index, 'solution', e.target.value)}
-                      placeholder="Add code answer..."
-                      rows={8}
-                      required
-                      className="code-textarea"
-                    />
-                  </div>
-                ))}
-              </div>
-              <button type="button" className="add-solution-btn" onClick={addCodingSolution}>
-                + Add Another Language
-              </button>
-            </div>
+            renderCodingSolutionsEditor('Add code answer...')
           ) : (
             <>
               <div className="form-group">
@@ -271,63 +343,42 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
             />
           </div>
 
-          <div className="form-group">
-            <label>Solutions (multiple languages)</label>
-            <div className="coding-solutions">
-              {codingSolutions.map((item, index) => (
-                <div key={index} className="coding-solution-item">
-                  <div className="coding-solution-header">
-                    <span className="coding-solution-title">Answer {index + 1}</span>
-                    {codingSolutions.length > 1 && (
-                      <button
-                        type="button"
-                        className="remove-solution-btn"
-                        onClick={() => removeCodingSolution(index)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <select
-                    value={item.language}
-                    onChange={(e) => updateCodingSolution(index, 'language', e.target.value)}
-                    required
-                  >
-                    {PROGRAMMING_LANGUAGES.map((lang) => (
-                      <option key={lang} value={lang}>
-                        {lang}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    value={item.solution}
-                    onChange={(e) => updateCodingSolution(index, 'solution', e.target.value)}
-                    placeholder="Paste your code solution..."
-                    rows={8}
-                    required
-                    className="code-textarea"
-                  />
-                </div>
-              ))}
-            </div>
-            <button type="button" className="add-solution-btn" onClick={addCodingSolution}>
-              + Add Another Language
-            </button>
-          </div>
+          {renderCodingSolutionsEditor('Paste your code solution...')}
         </>
       )}
 
       {type === 'blog' && (
-        <div className="form-group">
-          <label>Content (Markdown supported) *</label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Write your blog content..."
-            rows={10}
-            required
-          />
-        </div>
+        <>
+          <div className="form-group">
+            <label>Content (Markdown) *</label>
+            <div className="code-editor-wrapper">
+              <CodeMirror
+                value={content}
+                onChange={setContent}
+                theme={oneDark}
+                height="300px"
+                extensions={[markdown()]}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  highlightActiveLine: true,
+                }}
+                placeholder="Write your blog content in markdown..."
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Live Preview</label>
+            <div className="markdown-preview">
+              <div className="blog-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {content || 'Start writing markdown to preview your blog.'}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       <div className="form-group">
@@ -353,16 +404,22 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null }: NoteFormPro
           </button>
         </div>
         <div className="suggested-tags">
-          {DEFAULT_TAGS.filter(tag => !tags.includes(tag)).slice(0, 6).map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              className="suggestion"
-              onClick={() => addDefaultTag(tag)}
-            >
-              + {tag}
-            </button>
-          ))}
+          {[
+            ...existingTags,
+            ...DEFAULT_TAGS.filter((t) => !existingTags.includes(t)),
+          ]
+            .filter((tag) => !tags.includes(tag))
+            .slice(0, 12)
+            .map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="suggestion"
+                onClick={() => addDefaultTag(tag)}
+              >
+                + {tag}
+              </button>
+            ))}
         </div>
       </div>
 
