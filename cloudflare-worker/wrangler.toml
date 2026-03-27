@@ -8,5 +8,10 @@ compatibility_date = "2024-01-01"
 [vars]
 GITHUB_CLIENT_ID = "Ov23liGfeE9zIi8ekes4"
 ALLOWED_ORIGIN   = "https://manikantatarun.github.io"
+DATA_REPO_OWNER  = "manikantatarun"
+DATA_REPO_NAME   = "devnotes-data"
+DATA_REPO_BRANCH = "main"
 # GITHUB_CLIENT_SECRET must be added as a secret (not a plain var):
 # npx wrangler secret put GITHUB_CLIENT_SECRET
+# Optional for higher GitHub API rate limits when building /notes/meta index:
+# npx wrangler secret put GITHUB_API_TOKEN

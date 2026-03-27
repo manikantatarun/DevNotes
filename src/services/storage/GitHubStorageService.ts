@@ -159,6 +159,18 @@ export class GitHubStorageService implements IStorageService {
     return res.json() as Promise<T>;
   }
 
+  private async readFileData<T>(path: string): Promise<T | null> {
+    try {
+      const fromCdn = await this.cdnGet<T>(path);
+      if (fromCdn) return fromCdn;
+    } catch {
+      // fallback to API below
+    }
+
+    const fromApi = await this.apiGet<T>(path);
+    return fromApi?.data ?? null;
+  }
+
   private async putFile(path: string, data: unknown, sha: string, message: string): Promise<void> {
     if (!this.cfg.token) throw new Error('Not authenticated');
     const body: Record<string, unknown> = {
@@ -224,10 +236,7 @@ export class GitHubStorageService implements IStorageService {
       const fetched = await Promise.all(
         batch.map(async (id) => {
           try {
-            const meta = this.cfg.token
-              ? await this.apiGet<NoteMeta>(this.metaPath(id))
-              : await this.cdnGet<NoteMeta>(this.metaPath(id));
-            return meta ? (this.cfg.token ? (meta as RepoFile<NoteMeta>).data : meta as NoteMeta) : null;
+            return await this.readFileData<NoteMeta>(this.metaPath(id));
           } catch {
             return null;
           }
@@ -256,15 +265,11 @@ export class GitHubStorageService implements IStorageService {
 
   private async legacyFallbackNotes(): Promise<Note[]> {
     // Try new index.json first, then old notes.json
-    const tryIndex = this.cfg.token
-      ? await this.apiGet<Note[]>(this.legacyIndexPath)
-      : await this.cdnGet<Note[]>(this.legacyIndexPath);
-    if (tryIndex) return this.cfg.token ? (tryIndex as RepoFile<Note[]>).data : tryIndex as Note[];
+    const tryIndex = await this.readFileData<Note[]>(this.legacyIndexPath);
+    if (tryIndex) return tryIndex;
 
-    const tryNotes = this.cfg.token
-      ? await this.apiGet<Note[]>(this.legacyNotesPath)
-      : await this.cdnGet<Note[]>(this.legacyNotesPath);
-    if (tryNotes) return this.cfg.token ? (tryNotes as RepoFile<Note[]>).data : tryNotes as Note[];
+    const tryNotes = await this.readFileData<Note[]>(this.legacyNotesPath);
+    if (tryNotes) return tryNotes;
 
     return [];
   }
@@ -283,12 +288,10 @@ export class GitHubStorageService implements IStorageService {
   }
 
   async getNote(id: string): Promise<Note | null> {
-    // Always fetch the full note file
-    const full = this.cfg.token
-      ? await this.apiGet<Note>(this.notePath(id))
-      : await this.cdnGet<Note>(this.notePath(id));
+    // Always fetch full note file (CDN-first, API fallback)
+    const full = await this.readFileData<Note>(this.notePath(id));
 
-    if (full) return this.cfg.token ? (full as RepoFile<Note>).data : full as Note;
+    if (full) return full;
 
     // Legacy fallback: old notes.json
     const legacy = await this.legacyFallbackNotes();
