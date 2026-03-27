@@ -1,8 +1,43 @@
 import { useAuth } from '../../context/AuthContext';
+import { GITHUB_CONFIG } from '../../config';
+import { useState } from 'react';
 import './AuthButton.css';
 
 export function AuthButton() {
-  const { user, hasWriteAccess, loading, login, logout } = useAuth();
+  const { user, token, hasWriteAccess, loading, login, logout } = useAuth();
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  const handleSync = async () => {
+    if (!token || !GITHUB_CONFIG.oauthWorkerUrl || syncing) return;
+
+    try {
+      setSyncing(true);
+      setSyncMsg(null);
+
+      const res = await fetch(`${GITHUB_CONFIG.oauthWorkerUrl}/notes/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? `Sync failed (${res.status})`);
+      }
+
+      setSyncMsg('Synced');
+      window.dispatchEvent(new CustomEvent('devnotes:sync-complete'));
+      setTimeout(() => setSyncMsg(null), 2000);
+    } catch (error) {
+      setSyncMsg(error instanceof Error ? error.message : 'Sync failed');
+      setTimeout(() => setSyncMsg(null), 3000);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (loading) {
     return <div className="auth-btn auth-btn--loading">···</div>;
@@ -18,9 +53,20 @@ export function AuthButton() {
             {hasWriteAccess ? '✏️ can edit' : '👁️ read-only'}
           </span>
         </div>
+        {hasWriteAccess && (
+          <button
+            className="auth-btn auth-btn--sync"
+            onClick={handleSync}
+            disabled={syncing}
+            title="Sync metadata into KV"
+          >
+            {syncing ? 'Syncing…' : 'Sync'}
+          </button>
+        )}
         <button className="auth-btn auth-btn--logout" onClick={logout}>
           Sign out
         </button>
+        {syncMsg && <span className="auth-sync-msg">{syncMsg}</span>}
       </div>
     );
   }

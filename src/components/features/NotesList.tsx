@@ -32,11 +32,10 @@ interface WorkerMetaResponse {
 
 export function NotesList() {
   const { storageService, hasWriteAccess } = useAuth();
-  const { notes, loading, error, getNote, createNote, updateNote, deleteNote } = useNotes(storageService);
+  const { notes, loading, error, getNote, createNote, updateNote, deleteNote, refresh } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
-  const [openingNoteId, setOpeningNoteId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<NoteType | 'all'>('all');
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
   const [filterLanguage, setFilterLanguage] = useState<string>('all');
@@ -85,15 +84,14 @@ export function NotesList() {
   };
 
   const handleSelectNote = async (note: Note) => {
+    setSelectedNote(note);
     try {
-      setOpeningNoteId(note.id);
       const fullNote = await getNote(note.id);
-      setSelectedNote(fullNote ?? note);
+      if (fullNote) {
+        setSelectedNote(fullNote);
+      }
     } catch (err) {
       console.error('Failed to load note:', err);
-      setSelectedNote(note);
-    } finally {
-      setOpeningNoteId(null);
     }
   };
 
@@ -168,6 +166,17 @@ export function NotesList() {
   useEffect(() => {
     setRemotePage(1);
   }, [searchTerm, filterType, filterCategory, filterLanguage]);
+
+  useEffect(() => {
+    const onSyncComplete = () => {
+      refresh();
+    };
+
+    window.addEventListener('devnotes:sync-complete', onSyncComplete);
+    return () => {
+      window.removeEventListener('devnotes:sync-complete', onSyncComplete);
+    };
+  }, [refresh]);
 
   useEffect(() => {
     if (!isFiltered || !isWorkerConfigured) {
@@ -246,7 +255,6 @@ export function NotesList() {
   if (loading) return <div className="notes-container">Loading notes...</div>;
   if (error) return <div className="notes-container error">Error: {error}</div>;
   if (remoteLoading) return <div className="notes-container">Searching notes...</div>;
-  if (openingNoteId) return <div className="notes-container">Loading note...</div>;
 
   const allUsedTags = [...new Set(notes.flatMap((n) => n.tags))];
 

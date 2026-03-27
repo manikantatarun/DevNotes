@@ -2,18 +2,18 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 20px;
+  /* max-width: 1240px; */
+  /* margin: 0 auto; */
+  padding: 0 24px;
 }
 
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.25rem 0 1rem;
-  border-bottom: 2px solid #333;
-  margin-bottom: 2rem;
+  padding: 1.4rem 0 1.1rem;
+  border-bottom: 1px solid #2f3340;
+  margin-bottom: 1.5rem;
   gap: 1rem;
   flex-wrap: wrap;
 }
@@ -32,22 +32,22 @@
 }
 
 .app-header p {
-  color: #666;
-  margin: 0.5rem 0 0;
-  font-size: 1.1rem;
+  color: #9aa0a6;
+  margin: 0.35rem 0 0;
+  font-size: 1rem;
 }
 
 .app-main {
   flex: 1;
-  padding: 1rem 0;
+  padding: 0.75rem 0 1rem;
 }
 
 .app-footer {
   text-align: center;
-  padding: 1.5rem 0;
-  border-top: 1px solid #333;
-  margin-top: 2rem;
-  color: #666;
+  padding: 1.15rem 0 1.3rem;
+  border-top: 1px solid #2f3340;
+  margin-top: 1.5rem;
+  color: #8b9099;
   font-size: 0.9rem;
 }
 
@@ -59,6 +59,16 @@
 
 .app-footer a:hover {
   color: #764ba2;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 0 14px;
+  }
+
+  .app-header h1 {
+    font-size: 2rem;
+  }
 }
 
 
