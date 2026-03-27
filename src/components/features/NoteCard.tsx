@@ -6,9 +6,10 @@ interface NoteCardProps {
   note: Note;
   onDelete: (id: string) => void;
   onClick: (note: Note) => void;
+  canEdit?: boolean;
 }
 
-export function NoteCard({ note, onDelete, onClick }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardProps) {
   const codingLanguages = note.type === 'coding'
     ? note.solutions?.map((item) => item.language) || (note.language ? [note.language] : [])
     : [];
@@ -93,17 +94,19 @@ export function NoteCard({ note, onDelete, onClick }: NoteCardProps) {
 
       <div className="note-footer">
         <span className="note-date">{formatDateTime(note.updatedAt)}</span>
-        <button
-          className="btn-delete"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (confirm('Are you sure you want to delete this note?')) {
-              onDelete(note.id);
-            }
-          }}
-        >
-          🗑️ Delete
-        </button>
+        {canEdit && (
+          <button
+            className="btn-delete"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('Are you sure you want to delete this note?')) {
+                onDelete(note.id);
+              }
+            }}
+          >
+            🗑️ Delete
+          </button>
+        )}
       </div>
     </div>
   );

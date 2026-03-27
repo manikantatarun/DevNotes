@@ -1,20 +1,12 @@
 import type { IStorageService } from './IStorageService';
 import { LocalStorageService } from './LocalStorageService';
+import { GitHubStorageService } from './GitHubStorageService';
 
 /**
- * Storage Factory
- * Change the implementation here to switch between storage backends
- * 
- * Usage in components:
- * import { storageService } from '@/services/storage';
+ * Default (fallback) storage – used as placeholder before auth resolves.
+ * The AuthContext swaps in a GitHubStorageService once the user is known.
  */
-
-// Initialize your preferred storage service here
 export const storageService: IStorageService = new LocalStorageService();
 
-// When you want to switch to Firebase/Supabase, just change this:
-// export const storageService: IStorageService = new FirebaseStorageService();
-// export const storageService: IStorageService = new SupabaseStorageService();
-
 export type { IStorageService };
-export { LocalStorageService };
+export { LocalStorageService, GitHubStorageService };

@@ -1,0 +1,89 @@
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.auth-btn--login {
+  background: #24292f;
+  color: #fff;
+  border: 1px solid #444;
+}
+
+.auth-btn--login:hover {
+  background: #32383f;
+  border-color: #667eea;
+}
+
+.auth-btn--logout {
+  background: transparent;
+  color: #888;
+  border: 1px solid #444;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.7rem;
+}
+
+.auth-btn--logout:hover {
+  color: #fff;
+  border-color: #667eea;
+}
+
+.auth-btn--loading {
+  background: transparent;
+  color: #555;
+  border: 1px solid #333;
+  cursor: default;
+  letter-spacing: 2px;
+}
+
+.auth-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.auth-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid #444;
+}
+
+.auth-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.auth-name {
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.auth-role {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.auth-role--write {
+  color: #43e97b;
+}
+
+.auth-role--read {
+  color: #888;
+}
+
+@media (max-width: 600px) {
+  .auth-info {
+    display: none;
+  }
+}

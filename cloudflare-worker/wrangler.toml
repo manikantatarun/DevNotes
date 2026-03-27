@@ -1,0 +1,12 @@
+name = "devnotes-oauth"
+main = "oauth-worker.js"
+compatibility_date = "2024-01-01"
+
+# Set these secrets via:  npx wrangler secret put GITHUB_CLIENT_SECRET
+# or in the Cloudflare dashboard under Workers → your worker → Settings → Variables
+
+[vars]
+GITHUB_CLIENT_ID = "Ov23liGfeE9zIi8ekes4"
+ALLOWED_ORIGIN   = "https://manikantatarun.github.io"
+# GITHUB_CLIENT_SECRET must be added as a secret (not a plain var):
+# npx wrangler secret put GITHUB_CLIENT_SECRET

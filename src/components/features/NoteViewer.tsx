@@ -9,9 +9,10 @@ interface NoteViewerProps {
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  canEdit?: boolean;
 }
 
-export function NoteViewer({ note, onClose, onEdit, onDelete }: NoteViewerProps) {
+export function NoteViewer({ note, onClose, onEdit, onDelete, canEdit = false }: NoteViewerProps) {
   const codingSolutions = note.type === 'coding'
     ? (note.solutions && note.solutions.length > 0
       ? note.solutions
@@ -58,26 +59,28 @@ export function NoteViewer({ note, onClose, onEdit, onDelete }: NoteViewerProps)
 
   return (
     <div className="note-viewer">
-      <div className="viewer-header">
-        <button className="btn-back" onClick={onClose}>
-          ← Back
-        </button>
         <div className="viewer-actions">
-          <button className="btn-edit-viewer" onClick={onEdit}>
-            ✏️ Edit
+          <button className="btn-back" onClick={onClose}>
+            ← Back
           </button>
-          <button
-            className="btn-delete-viewer"
-            onClick={() => {
-              if (confirm('Are you sure you want to delete this note?')) {
-                onDelete();
-              }
-            }}
-          >
-            🗑️ Delete
-          </button>
+          {canEdit && (
+            <div className="viewer-write-actions">
+              <button className="btn-edit-viewer" onClick={onEdit}>
+                ✏️ Edit
+              </button>
+              <button
+                className="btn-delete-viewer"
+                onClick={() => {
+                  if (confirm('Are you sure you want to delete this note?')) {
+                    onDelete();
+                  }
+                }}
+              >
+                🗑️ Delete
+              </button>
+            </div>
+          )}
         </div>
-      </div>
 
       <div className="viewer-content">
         <div className="viewer-meta">

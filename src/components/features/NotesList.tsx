@@ -1,5 +1,6 @@
 import { useNotes } from '../../hooks/useNotes';
 import { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
@@ -8,10 +9,12 @@ import { NOTE_TYPES, CATEGORIES } from '../../constants';
 import './NotesList.css';
 
 export function NotesList() {
-  const { notes, loading, error, createNote, updateNote, deleteNote } = useNotes();
+  const { storageService, hasWriteAccess } = useAuth();
+  const { notes, loading, error, getNote, createNote, updateNote, deleteNote } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [openingNoteId, setOpeningNoteId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<NoteType | 'all'>('all');
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,6 +43,19 @@ export function NotesList() {
     }
   };
 
+  const handleSelectNote = async (note: Note) => {
+    try {
+      setOpeningNoteId(note.id);
+      const fullNote = await getNote(note.id);
+      setSelectedNote(fullNote ?? note);
+    } catch (err) {
+      console.error('Failed to load note:', err);
+      setSelectedNote(note);
+    } finally {
+      setOpeningNoteId(null);
+    }
+  };
+
   const filteredNotes = notes.filter(note => {
     const matchesType = filterType === 'all' || note.type === filterType;
     const matchesCategory = filterCategory === 'all' || note.category === filterCategory;
@@ -52,6 +68,7 @@ export function NotesList() {
 
   if (loading) return <div className="notes-container">Loading notes...</div>;
   if (error) return <div className="notes-container error">Error: {error}</div>;
+  if (openingNoteId) return <div className="notes-container">Loading note...</div>;
 
   const allUsedTags = [...new Set(notes.flatMap((n) => n.tags))];
 
@@ -74,6 +91,7 @@ export function NotesList() {
       <NoteViewer
         note={selectedNote}
         onClose={() => setSelectedNote(null)}
+        canEdit={hasWriteAccess}
         onEdit={() => {
           setEditingNote(selectedNote);
           setShowForm(true);
@@ -91,9 +109,11 @@ export function NotesList() {
       <div className="notes-header">
         <div className="header-top">
           <h2>📚 My Notes ({filteredNotes.length})</h2>
-          <button className="btn-new-note" onClick={() => setShowForm(true)}>
-            ➕ New Note
-          </button>
+          {hasWriteAccess && (
+            <button className="btn-new-note" onClick={() => setShowForm(true)}>
+              ➕ New Note
+            </button>
+          )}
         </div>
 
         <div className="filters">
@@ -142,8 +162,9 @@ export function NotesList() {
             <NoteCard
               key={note.id}
               note={note}
+              canEdit={hasWriteAccess}
               onDelete={deleteNote}
-              onClick={setSelectedNote}
+              onClick={handleSelectNote}
             />
           ))}
         </div>
