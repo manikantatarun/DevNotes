@@ -306,7 +306,46 @@ function intersectIdSets(sets) {
   return first.filter((id) => rest.every((set) => set.includes(id)));
 }
 
-async function fetchMetaIndexFromGitHub(env) {
+// Fetch meta index via GitHub Tree API (always fresh, requires token)
+async function fetchMetaIndexViaGitHubAPI(env, token) {
+  const { owner, repo, branch } = getRepoConfig(env);
+  const treeRes = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    { headers: githubHeaders(token) },
+  );
+  if (!treeRes.ok) throw new Error(`GitHub tree API error ${treeRes.status}`);
+  const tree = await treeRes.json();
+
+  const metaPaths = (tree.tree || [])
+    .filter((f) => f.type === 'blob' && f.path?.startsWith('meta/') && f.path.endsWith('.json'))
+    .map((f) => f.path);
+
+  const chunkSize = 10;
+  const allMeta = [];
+
+  for (let i = 0; i < metaPaths.length; i += chunkSize) {
+    const chunk = metaPaths.slice(i, i + chunkSize);
+    const rows = await Promise.all(
+      chunk.map(async (path) => {
+        try {
+          const file = await githubGetFile(path, env, token);
+          return file?.data || null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const row of rows) {
+      if (row?.id) allMeta.push(row);
+    }
+  }
+
+  allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return allMeta;
+}
+
+// Fetch meta index via jsDelivr CDN (no auth needed, may be stale — only for bootstrap)
+async function fetchMetaIndexFromCDN(env) {
   const { owner, repo, branch } = getRepoConfig(env);
   const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat`;
   const jsdRes = await fetch(jsdUrl);
@@ -339,7 +378,6 @@ async function fetchMetaIndexFromGitHub(env) {
         }
       }),
     );
-
     for (const row of rows) {
       if (row?.id) allMeta.push(row);
     }
@@ -373,7 +411,8 @@ async function ensureKvBootstrapped(env) {
   const marked = await env.META_KV.get(KV_BOOTSTRAPPED);
   if (marked) return;
 
-  const allMeta = await fetchMetaIndexFromGitHub(env);
+  // Bootstrap from CDN (no auth needed; acceptable for first-time setup)
+  const allMeta = await fetchMetaIndexFromCDN(env);
   await rebuildKvFromMetas(env, allMeta);
 }
 
@@ -446,8 +485,9 @@ async function handleNotesMeta(request, env, origin) {
   return json(paginate(rows, url.searchParams), 200, origin, 'public, max-age=20');
 }
 
-async function handleNotesSync(env, origin) {
-  const metas = await fetchMetaIndexFromGitHub(env);
+async function handleNotesSync(env, origin, token) {
+  // Use GitHub API directly (requires token) so we always get fresh data, not stale CDN
+  const metas = await fetchMetaIndexViaGitHubAPI(env, token);
   await rebuildKvFromMetas(env, metas);
   return json({ ok: true, count: metas.length }, 200, origin);
 }
@@ -577,7 +617,7 @@ export default {
       if (url.pathname === '/notes/sync' && request.method === 'POST') {
         const auth = await assertWriteAuthorized(request, env, origin);
         if (!auth.ok) return auth.response;
-        return await handleNotesSync(env, origin);
+        return await handleNotesSync(env, origin, auth.token);
       }
 
       if (url.pathname === '/notes/create' && request.method === 'POST') {
