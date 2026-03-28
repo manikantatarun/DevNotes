@@ -1,8 +1,9 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { GITHUB_CONFIG } from '../config';
 import { GitHubStorageService } from '../services/storage/GitHubStorageService';
 import type { IStorageService } from '../services/storage/IStorageService';
+import { AuthContext } from './auth-context';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ interface AuthState {
   storageService: IStorageService;
 }
 
-interface AuthContextValue extends AuthState {
+export interface AuthContextValue extends AuthState {
   login: () => void;
   logout: () => void;
 }
@@ -80,16 +81,6 @@ function buildStorageService(token?: string): IStorageService {
     token,
     workerUrl: GITHUB_CONFIG.oauthWorkerUrl,
   });
-}
-
-// ── Context ───────────────────────────────────────────────────────────────────
-
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
-  return ctx;
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -163,9 +154,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check session storage for existing token
     const existingToken = loadToken();
     if (existingToken) {
-      resolveToken(existingToken);
+      setTimeout(() => {
+        void resolveToken(existingToken);
+      }, 0);
     } else {
-      setState((prev) => ({ ...prev, loading: false }));
+      setTimeout(() => {
+        setState((prev) => ({ ...prev, loading: false }));
+      }, 0);
     }
   }, [resolveToken]);
 

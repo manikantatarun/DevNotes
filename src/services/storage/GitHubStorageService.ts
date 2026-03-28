@@ -529,7 +529,7 @@ export class GitHubStorageService implements IStorageService {
 
   // ── Folder stubs ──────────────────────────────────────────────────────────
   async getFolders(): Promise<Folder[]> { return []; }
-  async getFolder(_id: string): Promise<null> { return null; }
+  async getFolder(id: string): Promise<null> { void id; return null; }
   async createFolder(): Promise<never> { throw new Error('Not supported'); }
   async updateFolder(): Promise<never> { throw new Error('Not supported'); }
   async deleteFolder(): Promise<void> {}

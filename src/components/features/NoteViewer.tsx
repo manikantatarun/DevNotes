@@ -73,32 +73,26 @@ export function NoteViewer({
 }: NoteViewerProps) {
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
-  const [slideClass, setSlideClass] = useState('');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const [isMobileView, setIsMobileView] = useState(false);
+  const [isMobileView, setIsMobileView] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 768px)').matches;
+  });
+
+  const slideClass = navigationDirection === 'next'
+    ? 'note-viewer-slide-next'
+    : navigationDirection === 'prev'
+    ? 'note-viewer-slide-prev'
+    : 'note-viewer-fade';
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 768px)');
     const updateMobileState = (event?: MediaQueryListEvent) => {
       setIsMobileView(event ? event.matches : mediaQuery.matches);
     };
-
-    updateMobileState();
     mediaQuery.addEventListener('change', updateMobileState);
     return () => mediaQuery.removeEventListener('change', updateMobileState);
   }, []);
-
-  useEffect(() => {
-    const nextClass = navigationDirection === 'next'
-      ? 'note-viewer-slide-next'
-      : navigationDirection === 'prev'
-      ? 'note-viewer-slide-prev'
-      : 'note-viewer-fade';
-
-    setSlideClass(nextClass);
-    const timeout = setTimeout(() => setSlideClass(''), 260);
-    return () => clearTimeout(timeout);
-  }, [note.id, navigationDirection]);
 
   const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (isMobileView) return;

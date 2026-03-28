@@ -11,10 +11,6 @@ export function useFolders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadFolders();
-  }, []);
-
   const loadFolders = useCallback(async () => {
     try {
       setLoading(true);
@@ -27,6 +23,10 @@ export function useFolders() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    void loadFolders();
+  }, [loadFolders]);
 
   const createFolder = useCallback(async (folderData: Omit<Folder, 'id' | 'createdAt'>) => {
     try {

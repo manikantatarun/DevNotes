@@ -6,6 +6,7 @@ on:
       - main
       - release
       - release/**
+      - feature/**
   release:
     types:
       - published

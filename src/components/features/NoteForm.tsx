@@ -21,7 +21,7 @@ import { NOTE_TYPES, CATEGORIES, PROGRAMMING_LANGUAGES, DEFAULT_TAGS } from '../
 import './NoteForm.css';
 
 interface NoteFormProps {
-  onSubmit: (noteData: any) => void;
+  onSubmit: (noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onCancel: () => void;
   initialNote?: Note | null;
   existingTags?: string[];
@@ -321,7 +321,7 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags 
       tags,
     };
 
-    let noteData;
+    let noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
     switch (type) {
       case 'qa': {
         const isCodingCategory = category === 'coding';

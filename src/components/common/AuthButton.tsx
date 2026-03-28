@@ -1,4 +1,4 @@
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import { GITHUB_CONFIG } from '../../config';
 import { useState } from 'react';
 import './AuthButton.css';
