@@ -1,73 +1,132 @@
-# React + TypeScript + Vite
+# DevNotes
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+DevNotes is an interview-focused developer notes app for storing Q&A, coding solutions, and markdown blog notes with GitHub-backed persistence.
 
-Currently, two official plugins are available:
+Live app: https://manikantatarun.github.io/DevNotes/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- Note types: Q&A, Coding, Blog
+- Filtered search (type, category, language, text)
+- In-view note navigation (previous/next within current filtered scope)
+- Markdown blog editor with live preview
+- Rich blog authoring actions (headings, lists, links, code blocks)
+- Blog image upload support
+  - Signed-in GitHub mode: uploads image files into the data repository
+  - Local mode: embeds images as data URLs
+- GitHub OAuth sign-in with read/write access checks
+- Scalable metadata indexing in Cloudflare KV
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Architecture Overview
 
-## Expanding the ESLint configuration
+### Frontend
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- React + TypeScript + Vite
+- Main note UX in [src/components/features](src/components/features)
+- Authentication state in [src/context/AuthContext.tsx](src/context/AuthContext.tsx)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Storage Layer
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+The app uses a storage abstraction via [src/services/storage/IStorageService.ts](src/services/storage/IStorageService.ts).
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Current implementations:
+
+- [src/services/storage/GitHubStorageService.ts](src/services/storage/GitHubStorageService.ts)
+  - Notes stored as `notes/{id}.json`
+  - Metadata stored as `meta/{id}.json`
+  - Blog images stored under `images/YYYY/MM/...`
+- [src/services/storage/LocalStorageService.ts](src/services/storage/LocalStorageService.ts)
+
+### Cloudflare Worker
+
+Worker source: [cloudflare-worker/worker.js](cloudflare-worker/worker.js)
+
+Responsibilities:
+
+- OAuth code exchange (`POST /oauth/token`)
+- Metadata query endpoint (`GET /notes/meta`)
+- CRUD endpoints for authenticated writers
+- KV metadata index bootstrap/sync
+
+#### Auto Sync Behavior
+
+- **First bootstrap**: if KV is empty, metadata is loaded from jsDelivr CDN.
+- **Scheduled sync**: Cloudflare cron runs hourly (configured in [cloudflare-worker/wrangler.toml](cloudflare-worker/wrangler.toml)).
+- **Manual sync endpoint**: `POST /notes/sync` refreshes from GitHub API using an authenticated token.
+
+## Repository Structure
+
+```text
+.
+├── cloudflare-worker/         # Worker + Wrangler config
+├── src/                       # Frontend source
+│   ├── components/
+│   ├── context/
+│   ├── hooks/
+│   ├── services/storage/
+│   ├── config/
+│   ├── constants/
+│   ├── types/
+│   └── utils/
+└── .github/workflows/         # CI/CD (Pages deploy)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Environment Configuration
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Frontend build variables (GitHub Actions repository variables):
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- `VITE_GITHUB_CLIENT_ID`
+- `VITE_OAUTH_WORKER_URL`
+- `VITE_DATA_REPO_OWNER`
+- `VITE_DATA_REPO_NAME`
+- `VITE_DATA_REPO_BRANCH`
+- `VITE_APP_BASE_URL`
+
+Worker config and secrets:
+
+- Vars in [cloudflare-worker/wrangler.toml](cloudflare-worker/wrangler.toml)
+- Required secret: `GITHUB_CLIENT_SECRET`
+
+Set worker secret:
+
+```bash
+cd cloudflare-worker
+npx wrangler secret put GITHUB_CLIENT_SECRET
+```
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+Build:
+
+```bash
+npm run build
+```
+
+Deploy frontend to GitHub Pages:
+
+```bash
+npm run deploy
+```
+
+## CI/CD
+
+GitHub Pages workflow: [.github/workflows/deploy.yml](.github/workflows/deploy.yml)
+
+- Build + lint on PRs to `main`
+- Deploy on pushes to `main`/`release` branches and on published GitHub Releases
+- Uses repository variables for all Vite config
+
+## Notes
+
+- CDN-based metadata sync can be stale briefly due to CDN cache propagation.
+- Manual sync is available when immediate freshness is required.
+
+## License
+
+MIT
 ```

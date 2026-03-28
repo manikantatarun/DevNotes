@@ -1,0 +1,104 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - release
+      - release/**
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Validate required build variables
+        env:
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+          VITE_OAUTH_WORKER_URL: ${{ vars.VITE_OAUTH_WORKER_URL }}
+          VITE_DATA_REPO_OWNER: ${{ vars.VITE_DATA_REPO_OWNER }}
+          VITE_DATA_REPO_NAME: ${{ vars.VITE_DATA_REPO_NAME }}
+          VITE_DATA_REPO_BRANCH: ${{ vars.VITE_DATA_REPO_BRANCH }}
+          VITE_APP_BASE_URL: ${{ vars.VITE_APP_BASE_URL }}
+        run: |
+          set -e
+          required_vars=(
+            VITE_GITHUB_CLIENT_ID
+            VITE_OAUTH_WORKER_URL
+            VITE_DATA_REPO_OWNER
+            VITE_DATA_REPO_NAME
+            VITE_DATA_REPO_BRANCH
+            VITE_APP_BASE_URL
+          )
+          for var_name in "${required_vars[@]}"; do
+            if [ -z "${!var_name}" ]; then
+              echo "Missing required repository variable: $var_name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Build application
+        run: npm run build
+        env:
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+          VITE_OAUTH_WORKER_URL: ${{ vars.VITE_OAUTH_WORKER_URL }}
+          VITE_DATA_REPO_OWNER: ${{ vars.VITE_DATA_REPO_OWNER }}
+          VITE_DATA_REPO_NAME: ${{ vars.VITE_DATA_REPO_NAME }}
+          VITE_DATA_REPO_BRANCH: ${{ vars.VITE_DATA_REPO_BRANCH }}
+          VITE_APP_BASE_URL: ${{ vars.VITE_APP_BASE_URL }}
+
+      - name: Add Pages static markers
+        run: |
+          touch dist/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./dist"
+
+  deploy:
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/release'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
