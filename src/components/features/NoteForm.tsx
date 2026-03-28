@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { javascript } from '@codemirror/lang-javascript';
@@ -12,9 +12,11 @@ import { sql } from '@codemirror/lang-sql';
 import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
 import { markdown } from '@codemirror/lang-markdown';
+import type { EditorView } from '@codemirror/view';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { NoteType, Category, Note } from '../../types';
+import type { IStorageService } from '../../services/storage/IStorageService';
 import { NOTE_TYPES, CATEGORIES, PROGRAMMING_LANGUAGES, DEFAULT_TAGS } from '../../constants';
 import './NoteForm.css';
 
@@ -23,6 +25,7 @@ interface NoteFormProps {
   onCancel: () => void;
   initialNote?: Note | null;
   existingTags?: string[];
+  storageService: IStorageService;
 }
 
 function getCodeExtensions(language: string) {
@@ -56,7 +59,7 @@ function getCodeExtensions(language: string) {
   }
 }
 
-export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags = [] }: NoteFormProps) {
+export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags = [], storageService }: NoteFormProps) {
   const [type, setType] = useState<NoteType>(initialNote?.type ?? 'qa');
   const [category, setCategory] = useState<Category>(initialNote?.category ?? 'general');
   const [title, setTitle] = useState(initialNote?.title ?? '');
@@ -88,6 +91,225 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags 
   const [content, setContent] = useState(initialNote?.content ?? '');
   const [tags, setTags] = useState<string[]>(initialNote?.tags ?? []);
   const [newTag, setNewTag] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const [imageUploadMessage, setImageUploadMessage] = useState<string | null>(null);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const blogEditorViewRef = useRef<EditorView | null>(null);
+
+  const focusBlogEditor = () => {
+    requestAnimationFrame(() => {
+      blogEditorViewRef.current?.focus();
+    });
+  };
+
+  const insertIntoBlogEditor = (text: string, selectionOverride?: { from: number; to: number }) => {
+    const view = blogEditorViewRef.current;
+
+    if (!view) {
+      setContent((prev) => `${prev}${text}`);
+      return;
+    }
+
+    const selection = selectionOverride ?? {
+      from: view.state.selection.main.from,
+      to: view.state.selection.main.to,
+    };
+
+    view.dispatch({
+      changes: {
+        from: selection.from,
+        to: selection.to,
+        insert: text,
+      },
+      selection: {
+        anchor: selection.from + text.length,
+      },
+    });
+
+    focusBlogEditor();
+  };
+
+  const wrapBlogSelection = (prefix: string, suffix: string, placeholder: string) => {
+    const view = blogEditorViewRef.current;
+
+    if (!view) {
+      const fallback = `${prefix}${placeholder}${suffix}`;
+      setContent((prev) => `${prev}${fallback}`);
+      return;
+    }
+
+    const { from, to } = view.state.selection.main;
+    const selected = view.state.sliceDoc(from, to);
+    const inner = selected || placeholder;
+    const nextText = `${prefix}${inner}${suffix}`;
+    const anchor = from + prefix.length + inner.length;
+
+    view.dispatch({
+      changes: { from, to, insert: nextText },
+      selection: { anchor },
+    });
+
+    focusBlogEditor();
+  };
+
+  const insertBlockAtCursor = (block: string) => {
+    const view = blogEditorViewRef.current;
+
+    if (!view) {
+      setContent((prev) => `${prev}${block}`);
+      return;
+    }
+
+    const { from, to } = view.state.selection.main;
+    const doc = view.state.doc.toString();
+    const needsLeadingBreak = from > 0 && !doc.slice(0, from).endsWith('\n\n');
+    const needsTrailingBreak = to < doc.length && !doc.slice(to).startsWith('\n\n');
+    const text = `${needsLeadingBreak ? '\n\n' : ''}${block}${needsTrailingBreak ? '\n\n' : ''}`;
+
+    insertIntoBlogEditor(text, { from, to });
+  };
+
+  const handleInsertLink = () => {
+    const text = window.prompt('Link text', 'Read more');
+    if (text === null) return;
+
+    const url = window.prompt('Link URL', 'https://');
+    if (!url) return;
+
+    insertIntoBlogEditor(`[${text || 'Read more'}](${url})`);
+  };
+
+  const handleBlogToolbarAction = (action: string) => {
+    switch (action) {
+      case 'h1':
+        insertBlockAtCursor('# Heading');
+        break;
+      case 'h2':
+        insertBlockAtCursor('## Section title');
+        break;
+      case 'h3':
+        insertBlockAtCursor('### Subsection');
+        break;
+      case 'bold':
+        wrapBlogSelection('**', '**', 'bold text');
+        break;
+      case 'italic':
+        wrapBlogSelection('*', '*', 'italic text');
+        break;
+      case 'quote':
+        insertBlockAtCursor('> Important note');
+        break;
+      case 'ul':
+        insertBlockAtCursor('- First point\n- Second point\n- Third point');
+        break;
+      case 'ol':
+        insertBlockAtCursor('1. First step\n2. Second step\n3. Third step');
+        break;
+      case 'code':
+        insertBlockAtCursor('```ts\nconst example = true;\n```');
+        break;
+      case 'inline-code':
+        wrapBlogSelection('`', '`', 'code');
+        break;
+      case 'link':
+        handleInsertLink();
+        break;
+      case 'divider':
+        insertBlockAtCursor('---');
+        break;
+      default:
+        break;
+    }
+  };
+
+  const buildImageAlt = (fileName: string) => {
+    const plainName = fileName.replace(/\.[^.]+$/, '');
+    const normalized = plainName.replace(/[-_]+/g, ' ').trim();
+    return normalized || 'Blog image';
+  };
+
+  const appendMarkdownImage = (markdownImage: string, selectionOverride?: { from: number; to: number }) => {
+    const imageBlock = `\n\n${markdownImage}\n\n`;
+    insertIntoBlogEditor(imageBlock, selectionOverride);
+  };
+
+  const uploadBlogImageFile = async (file: File, selectionOverride?: { from: number; to: number }) => {
+    if (!file.type.startsWith('image/')) {
+      setImageUploadError('Please choose an image file.');
+      setImageUploadMessage(null);
+      return;
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+      setImageUploadError('Please upload an image smaller than 8 MB.');
+      setImageUploadMessage(null);
+      return;
+    }
+
+    try {
+      setIsUploadingImage(true);
+      setImageUploadError(null);
+      setImageUploadMessage(null);
+
+      const imageUrl = await storageService.uploadImage(file);
+      const markdownImage = `![${buildImageAlt(file.name)}](${imageUrl})`;
+
+      appendMarkdownImage(markdownImage, selectionOverride);
+      setImageUploadMessage(`Inserted ${file.name} into your blog content.`);
+    } catch (err) {
+      setImageUploadError(err instanceof Error ? err.message : 'Failed to upload image.');
+      setImageUploadMessage(null);
+    } finally {
+      setIsUploadingImage(false);
+      setIsDraggingImage(false);
+    }
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) return;
+
+    await uploadBlogImageFile(file);
+  };
+
+  const handleEditorDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if ([...event.dataTransfer.items].some((item) => item.type.startsWith('image/'))) {
+      event.preventDefault();
+      setIsDraggingImage(true);
+    }
+  };
+
+  const handleEditorDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+
+    setIsDraggingImage(false);
+  };
+
+  const handleEditorDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDraggingImage(false);
+
+    const imageFile = [...event.dataTransfer.files].find((file) => file.type.startsWith('image/'));
+    if (!imageFile) return;
+
+    const view = blogEditorViewRef.current;
+    let selectionOverride: { from: number; to: number } | undefined;
+
+    if (view) {
+      const dropPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (typeof dropPos === 'number') {
+        selectionOverride = { from: dropPos, to: dropPos };
+      }
+    }
+
+    await uploadBlogImageFile(imageFile, selectionOverride);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -351,30 +573,85 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags 
         <>
           <div className="form-group">
             <label>Content (Markdown) *</label>
-            <div className="code-editor-wrapper">
-              <CodeMirror
-                value={content}
-                onChange={setContent}
-                theme={oneDark}
-                height="300px"
-                extensions={[markdown()]}
-                basicSetup={{
-                  lineNumbers: true,
-                  foldGutter: true,
-                  highlightActiveLine: true,
-                }}
-                placeholder="Write your blog content in markdown..."
+            <div className="blog-editor-toolbar">
+              <div className="blog-toolbar-group">
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('h1')}>H1</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('h2')}>H2</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('h3')}>H3</button>
+              </div>
+              <div className="blog-toolbar-group">
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('bold')}><strong>B</strong></button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('italic')}><em>I</em></button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('inline-code')}>Code</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('link')}>Link</button>
+              </div>
+              <div className="blog-toolbar-group">
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('quote')}>Quote</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('ul')}>List</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('ol')}>Steps</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('code')}>Block</button>
+                <button type="button" className="blog-toolbar-btn" onClick={() => handleBlogToolbarAction('divider')}>---</button>
+              </div>
+              <button
+                type="button"
+                className="blog-upload-btn"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={isUploadingImage}
+              >
+                {isUploadingImage ? 'Uploading image...' : '🖼️ Add Image'}
+              </button>
+              <span className="blog-editor-hint">
+                Upload an image and insert markdown automatically.
+              </span>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="blog-image-input"
+                onChange={handleImageUpload}
               />
             </div>
-          </div>
+            <div className="blog-editor-hint blog-editor-drop-hint">
+              Use the toolbar for headings, links, lists, and code. Drag an image into the editor to upload it at the current drop position.
+            </div>
+            {(imageUploadError || imageUploadMessage) && (
+              <div className={`blog-upload-feedback ${imageUploadError ? 'error' : 'success'}`}>
+                {imageUploadError ?? imageUploadMessage}
+              </div>
+            )}
+            <div className="blog-editor-layout">
+              <div
+                className={`code-editor-wrapper blog-editor-surface ${isDraggingImage ? 'drag-over' : ''}`}
+                onDragOver={handleEditorDragOver}
+                onDragLeave={handleEditorDragLeave}
+                onDrop={handleEditorDrop}
+              >
+                {isDraggingImage && <div className="blog-drop-overlay">Drop image to upload and insert</div>}
+                <CodeMirror
+                  value={content}
+                  onChange={setContent}
+                  onCreateEditor={(view) => {
+                    blogEditorViewRef.current = view;
+                  }}
+                  theme={oneDark}
+                  height="420px"
+                  extensions={[markdown()]}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: true,
+                    highlightActiveLine: true,
+                  }}
+                  placeholder="Write your blog content in markdown..."
+                />
+              </div>
 
-          <div className="form-group">
-            <label>Live Preview</label>
-            <div className="markdown-preview">
-              <div className="blog-content">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {content || 'Start writing markdown to preview your blog.'}
-                </ReactMarkdown>
+              <div className="markdown-preview blog-preview-panel">
+                <div className="blog-preview-heading">Live Preview</div>
+                <div className="blog-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {content || 'Start writing markdown to preview your blog.'}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
           </div>

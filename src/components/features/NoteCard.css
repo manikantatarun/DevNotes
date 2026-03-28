@@ -1,85 +1,88 @@
 .note-card {
-  background: #1f2129;
-  border-radius: 12px;
-  padding: 1.1rem 1.15rem;
-  border: 1px solid #2b3040;
-  border-left: 3px solid #667eea;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  background: #161a22;
+  border-radius: 14px;
+  padding: 1.3rem;
+  border: 1px solid #262d39;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
   cursor: pointer;
 }
 
 .note-card:hover {
-  transform: translateY(-2px);
-  border-color: #3b4460;
-  box-shadow: 0 8px 18px rgba(10, 12, 20, 0.4);
+  transform: translateY(-1px);
+  border-color: #364055;
+  box-shadow: 0 8px 18px rgba(8, 10, 18, 0.2);
 }
 
 .note-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-}
-
-.note-type {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.type-icon {
-  font-size: 1.2rem;
+  margin-bottom: 0.8rem;
+  gap: 0.85rem;
 }
 
 .type-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #888;
-  letter-spacing: 0.5px;
-}
-
-.note-category {
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: white;
-  text-transform: capitalize;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #93a0b4;
+  letter-spacing: 0.12em;
 }
 
 .note-title {
-  margin: 0 0 0.75rem 0;
-  color: #fff;
-  font-size: 1.16rem;
-  font-weight: 600;
-  line-height: 1.4;
+  margin: 0 0 0.5rem 0;
+  color: #f3f6fb;
+  font-size: 1.14rem;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.note-meta-strip {
+  margin: 0 0 1rem;
+  color: #8995a7;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.note-reading-block {
+  margin-bottom: 1rem;
+}
+
+.note-reading-label {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  color: #a7b2c2;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .note-language {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.8rem;
 }
 
 .lang-badge {
   display: inline-block;
-  padding: 0.25rem 0.75rem;
-  background: #333;
-  color: #4facfe;
-  border-radius: 8px;
-  font-size: 0.8rem;
+  padding: 0.2rem 0.58rem;
+  background: #1b2230;
+  color: #98c5f1;
+  border-radius: 999px;
+  font-size: 0.72rem;
   font-family: 'Courier New', monospace;
   font-weight: 600;
+  border: 1px solid #29364c;
 }
 
 .note-preview {
-  color: #bec4cc;
-  font-size: 0.94rem;
-  line-height: 1.65;
-  margin: 0 0 1rem 0;
+  color: #d7dee8;
+  font-size: 0.98rem;
+  line-height: 1.82;
+  margin: 0;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,46 +92,65 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.95rem;
 }
 
 .note-tag {
-  font-size: 0.8rem;
-  color: #8ea1ff;
+  font-size: 0.74rem;
+  color: #a6b1c8;
   font-weight: 500;
+  background: #1b202c;
+  padding: 0.18rem 0.52rem;
+  border-radius: 999px;
 }
 
 .note-tag-more {
-  font-size: 0.8rem;
-  color: #888;
-  font-style: italic;
+  font-size: 0.76rem;
+  color: #8993a5;
 }
 
 .note-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-top: 1rem;
-  border-top: 1px solid #2f3340;
+  padding-top: 0.85rem;
+  border-top: 1px solid #272f40;
 }
 
 .note-date {
-  font-size: 0.85rem;
-  color: #8d949d;
+  font-size: 0.82rem;
+  color: #8f9bad;
+  font-weight: 500;
+}
+
+.note-open-hint {
+  font-size: 0.84rem;
+  color: #cbd3de;
+  font-weight: 600;
 }
 
 .btn-delete {
-  padding: 0.4rem 0.8rem;
-  border-radius: 6px;
+  padding: 0.36rem 0.72rem;
+  border-radius: 8px;
   border: none;
   background: transparent;
   color: #dc3545;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-delete:hover {
   background: rgba(220, 53, 69, 0.1);
-  transform: scale(1.05);
+  transform: none;
+}
+
+@media (max-width: 768px) {
+  .note-card {
+    padding: 1rem;
+  }
+
+  .note-card-header {
+    gap: 0.6rem;
+  }
 }

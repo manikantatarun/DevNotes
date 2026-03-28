@@ -16,30 +16,7 @@ export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardP
   const qaLanguages = note.type === 'qa'
     ? note.solutions?.map((item) => item.language) || (note.language ? [note.language] : [])
     : [];
-  const noteLanguages = [...qaLanguages, ...codingLanguages];
-
-  const getTypeIcon = () => {
-    switch (note.type) {
-      case 'qa': return '💬';
-      case 'coding': return '💻';
-      case 'blog': return '📝';
-    }
-  };
-
-  const getCategoryColor = () => {
-    const colors: Record<string, string> = {
-      'general': '#667eea',
-      'coding': '#00b894',
-      'system-design': '#f093fb',
-      'algorithms': '#4facfe',
-      'frontend': '#43e97b',
-      'backend': '#fa709a',
-      'database': '#feca57',
-      'devops': '#ff6348',
-      'other': '#888',
-    };
-    return colors[note.category] || '#667eea';
-  };
+  const noteLanguages = [...new Set([...qaLanguages, ...codingLanguages].filter(Boolean))];
 
   const getPreviewText = () => {
     switch (note.type) {
@@ -54,23 +31,40 @@ export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardP
     }
   };
 
+  const getPreviewLabel = () => {
+    switch (note.type) {
+      case 'qa':
+        return 'Question';
+      case 'coding':
+        return 'Problem';
+      case 'blog':
+        return 'Summary';
+      default:
+        return 'Preview';
+    }
+  };
+
+  const previewText = getPreviewText();
+  const metaText = [note.category, noteLanguages[0], formatDateTime(note.updatedAt)]
+    .filter(Boolean)
+    .join(' • ');
+
   return (
-    <div className="note-card" onClick={() => onClick(note)}>
+    <article className="note-card" onClick={() => onClick(note)}>
       <div className="note-card-header">
-        <div className="note-type">
-          <span className="type-icon">{getTypeIcon()}</span>
-          <span className="type-label">{note.type.toUpperCase()}</span>
-        </div>
-        <span 
-          className="note-category" 
-          style={{ backgroundColor: getCategoryColor() }}
-        >
-          {note.category}
-        </span>
+        <span className="type-label">{note.type.toUpperCase()}</span>
+        <span className="note-date">{formatDateTime(note.updatedAt)}</span>
       </div>
 
       <h3 className="note-title">{note.title}</h3>
-      
+
+      {metaText && <p className="note-meta-strip">{metaText}</p>}
+
+      <div className="note-reading-block">
+        <span className="note-reading-label">{getPreviewLabel()}</span>
+        <p className="note-preview">{previewText}</p>
+      </div>
+
       {noteLanguages.length > 0 && (
         <div className="note-language">
           {noteLanguages.map((lang) => (
@@ -78,8 +72,6 @@ export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardP
           ))}
         </div>
       )}
-
-      <p className="note-preview">{getPreviewText()}</p>
 
       {note.tags && note.tags.length > 0 && (
         <div className="note-tags">
@@ -93,7 +85,7 @@ export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardP
       )}
 
       <div className="note-footer">
-        <span className="note-date">{formatDateTime(note.updatedAt)}</span>
+        <span className="note-open-hint">Read note</span>
         {canEdit && (
           <button
             className="btn-delete"
@@ -108,6 +100,6 @@ export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardP
           </button>
         )}
       </div>
-    </div>
+    </article>
   );
 }

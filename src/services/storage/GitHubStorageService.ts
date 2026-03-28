@@ -66,6 +66,7 @@ export class GitHubStorageService implements IStorageService {
   private cdnBase = 'https://cdn.jsdelivr.net/gh';
   private metaDir = 'meta';
   private notesDir = 'notes';
+  private imageDir = 'images';
   // legacy paths kept for read-only fallback
   private legacyIndexPath = 'index.json';
   private legacyNotesPath = 'notes.json';
@@ -89,10 +90,50 @@ export class GitHubStorageService implements IStorageService {
     return btoa(unescape(encodeURIComponent(content)));
   }
 
+  private encodeBytes(bytes: Uint8Array): string {
+    let binary = '';
+    const chunkSize = 0x8000;
+
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+
+    return btoa(binary);
+  }
+
   // ── paths ─────────────────────────────────────────────────────────────────
 
   private metaPath(id: string) { return `${this.metaDir}/${id}.json`; }
   private notePath(id: string) { return `${this.notesDir}/${id}.json`; }
+
+  private sanitizeFileName(name: string): string {
+    const trimmed = name.trim() || 'image';
+    const parts = trimmed.split('.');
+    const ext = parts.length > 1 ? `.${parts.pop()?.toLowerCase() ?? 'png'}` : '';
+    const base = parts.join('.') || trimmed;
+
+    const safeBase = base
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'image';
+
+    return `${safeBase}${ext}`;
+  }
+
+  private imagePath(fileName: string): string {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const safeName = this.sanitizeFileName(fileName);
+    const randomSuffix = Math.random().toString(36).slice(2, 8);
+    return `${this.imageDir}/${year}/${month}/${Date.now()}-${randomSuffix}-${safeName}`;
+  }
+
+  private publicFileUrl(path: string): string {
+    const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
+    return `https://raw.githubusercontent.com/${this.cfg.owner}/${this.cfg.repo}/${this.cfg.branch}/${encodedPath}`;
+  }
 
   // ── meta helper ───────────────────────────────────────────────────────────
 
@@ -246,6 +287,32 @@ export class GitHubStorageService implements IStorageService {
         body: JSON.stringify(body),
       },
     );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { message?: string }).message ?? `GitHub write error ${res.status}`);
+    }
+  }
+
+  private async putRawFile(path: string, contentBase64: string, message: string, sha = ''): Promise<void> {
+    if (!this.cfg.token) throw new Error('Not authenticated');
+
+    const body: Record<string, unknown> = {
+      message,
+      content: contentBase64,
+      branch: this.cfg.branch,
+    };
+
+    if (sha) body.sha = sha;
+
+    const res = await fetch(
+      `${this.apiBase}/repos/${this.cfg.owner}/${this.cfg.repo}/contents/${path}`,
+      {
+        method: 'PUT',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      },
+    );
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error((err as { message?: string }).message ?? `GitHub write error ${res.status}`);
@@ -441,6 +508,23 @@ export class GitHubStorageService implements IStorageService {
       noteSha ? this.deleteFile(this.notePath(id), noteSha, `delete note: ${title}`) : Promise.resolve(),
       metaSha ? this.deleteFile(this.metaPath(id), metaSha, `delete meta: ${title}`) : Promise.resolve(),
     ]);
+  }
+
+  async uploadImage(file: File): Promise<string> {
+    if (!this.cfg.token) {
+      throw new Error('Sign in with GitHub to upload images');
+    }
+
+    if (!file.type.startsWith('image/')) {
+      throw new Error('Please select a valid image file');
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const path = this.imagePath(file.name);
+
+    await this.putRawFile(path, this.encodeBytes(bytes), `upload image: ${file.name}`);
+
+    return this.publicFileUrl(path);
   }
 
   // ── Folder stubs ──────────────────────────────────────────────────────────

@@ -235,6 +235,7 @@ function kvIndexKey(kind, value) {
 
 const KV_ALL_IDS = 'idx:all';
 const KV_BOOTSTRAPPED = 'sys:bootstrapped';
+const KV_SYNC_TIMESTAMP = 'sys:sync-timestamp';
 
 async function kvGetIdSet(env, key) {
   const raw = await env.META_KV.get(key, 'json');
@@ -409,11 +410,12 @@ async function rebuildKvFromMetas(env, metas) {
 
 async function ensureKvBootstrapped(env) {
   const marked = await env.META_KV.get(KV_BOOTSTRAPPED);
-  if (marked) return;
+  if (marked) return; // Already bootstrapped
 
   // Bootstrap from CDN (no auth needed; acceptable for first-time setup)
   const allMeta = await fetchMetaIndexFromCDN(env);
   await rebuildKvFromMetas(env, allMeta);
+  await env.META_KV.put(KV_SYNC_TIMESTAMP, String(Date.now()));
 }
 
 function applySearchFilter(data, query) {
@@ -489,6 +491,7 @@ async function handleNotesSync(env, origin, token) {
   // Use GitHub API directly (requires token) so we always get fresh data, not stale CDN
   const metas = await fetchMetaIndexViaGitHubAPI(env, token);
   await rebuildKvFromMetas(env, metas);
+  await env.META_KV.put(KV_SYNC_TIMESTAMP, String(Date.now()));
   return json({ ok: true, count: metas.length }, 200, origin);
 }
 
@@ -601,6 +604,18 @@ async function handleDelete(request, env, origin, token) {
 }
 
 export default {
+  async scheduled(event, env) {
+    // Scheduled sync every hour via Cloudflare Cron (from CDN, no auth needed)
+    try {
+      const metas = await fetchMetaIndexFromCDN(env);
+      await rebuildKvFromMetas(env, metas);
+      await env.META_KV.put(KV_SYNC_TIMESTAMP, String(Date.now()));
+      console.log(`[Cron] Synced KV with ${metas.length} notes from CDN`);
+    } catch (error) {
+      console.error('[Cron] Sync failed:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  },
+
   async fetch(request, env) {
     const origin = env.ALLOWED_ORIGIN || '*';
     const url = new URL(request.url);

@@ -35,6 +35,7 @@ export function NotesList() {
   const { notes, loading, error, getNote, createNote, updateNote, deleteNote, refresh } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [viewerNavDirection, setViewerNavDirection] = useState<'prev' | 'next' | null>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [filterType, setFilterType] = useState<NoteType | 'all'>('all');
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
@@ -83,7 +84,8 @@ export function NotesList() {
     }
   };
 
-  const handleSelectNote = async (note: Note) => {
+  const handleSelectNote = async (note: Note, navigationDirection: 'prev' | 'next' | null = null) => {
+    setViewerNavDirection(navigationDirection);
     setSelectedNote(note);
     try {
       const fullNote = await getNote(note.id);
@@ -251,6 +253,47 @@ export function NotesList() {
   const remoteRangeEnd = isRemoteMode
     ? remoteRangeStart + displayedNotes.length - 1
     : 0;
+  const selectedNoteIndex = selectedNote
+    ? displayedNotes.findIndex((note) => note.id === selectedNote.id)
+    : -1;
+  const activeScopeParts: string[] = [];
+
+  if (filterType !== 'all') {
+    activeScopeParts.push(`type: ${filterType}`);
+  }
+  if (filterCategory !== 'all') {
+    activeScopeParts.push(`category: ${filterCategory}`);
+  }
+  if (filterLanguage !== 'all') {
+    activeScopeParts.push(`language: ${filterLanguage}`);
+  }
+  if (searchTerm.trim()) {
+    activeScopeParts.push(`search: ${searchTerm.trim()}`);
+  }
+
+  const viewerScopeLabel = activeScopeParts.length > 0
+    ? `Filtered by ${activeScopeParts.join(' · ')}`
+    : 'All notes';
+
+  const handleNavigateSelectedNote = async (direction: 'prev' | 'next') => {
+    if (!selectedNote || displayedNotes.length === 0) return;
+
+    const currentIndex = displayedNotes.findIndex((note) => note.id === selectedNote.id);
+    if (currentIndex < 0) return;
+
+    const nextIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+    if (nextIndex < 0 || nextIndex >= displayedNotes.length) return;
+
+    await handleSelectNote(displayedNotes[nextIndex], direction);
+  };
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setFilterType('all');
+    setFilterCategory('all');
+    setFilterLanguage('all');
+    setRemotePage(1);
+  };
 
   if (loading) return <div className="notes-container">Loading notes...</div>;
   if (error) return <div className="notes-container error">Error: {error}</div>;
@@ -263,6 +306,7 @@ export function NotesList() {
       <NoteForm
         initialNote={editingNote}
         existingTags={allUsedTags}
+        storageService={storageService}
         onSubmit={editingNote ? handleUpdateNote : handleCreateNote}
         onCancel={() => {
           setShowForm(false);
@@ -276,7 +320,30 @@ export function NotesList() {
     return (
       <NoteViewer
         note={selectedNote}
-        onClose={() => setSelectedNote(null)}
+        onClose={() => {
+          setViewerNavDirection(null);
+          setSelectedNote(null);
+        }}
+        onPrevious={() => void handleNavigateSelectedNote('prev')}
+        onNext={() => void handleNavigateSelectedNote('next')}
+        hasPrevious={selectedNoteIndex > 0}
+        hasNext={selectedNoteIndex >= 0 && selectedNoteIndex < displayedNotes.length - 1}
+        positionLabel={selectedNoteIndex >= 0 ? `${selectedNoteIndex + 1} / ${displayedNotes.length}` : undefined}
+        scopeLabel={viewerScopeLabel}
+        navigationDirection={viewerNavDirection}
+        searchTerm={searchTerm}
+        onSearchTermChange={setSearchTerm}
+        filterType={filterType}
+        onFilterTypeChange={setFilterType}
+        filterCategory={filterCategory}
+        onFilterCategoryChange={setFilterCategory}
+        filterLanguage={filterLanguage}
+        onFilterLanguageChange={setFilterLanguage}
+        availableLanguages={availableLanguages}
+        noteTypeOptions={NOTE_TYPES}
+        categoryOptions={CATEGORIES}
+        isFiltered={isFiltered}
+        onClearFilters={handleClearFilters}
         canEdit={hasWriteAccess}
         onEdit={() => {
           setEditingNote(selectedNote);
@@ -294,7 +361,7 @@ export function NotesList() {
     <div className="notes-container">
       <div className="notes-header">
         <div className="header-top">
-          <h2>📚 My Notes ({displayedCount}{isFiltered ? ` / ${notes.length}` : ''})</h2>
+          <h2>Notes ({displayedCount}{isFiltered ? ` / ${notes.length}` : ''})</h2>
           {hasWriteAccess && (
             <button className="btn-new-note" onClick={() => setShowForm(true)}>
               ➕ New Note
@@ -303,67 +370,78 @@ export function NotesList() {
         </div>
 
         <div className="filters">
-          <div className="search-box">
-            <input
-              type="text"
-              placeholder="🔍 Search title, tags, question…"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-
-          <div className="filter-row">
-            <div className="filter-group">
-              <label>Type:</label>
-              <select value={filterType} onChange={(e) => setFilterType(e.target.value as NoteType | 'all')}>
-                <option value="all">All Types</option>
-                {NOTE_TYPES.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.icon} {type.label}
-                  </option>
-                ))}
-              </select>
+          <div className="search-row">
+            <div className="search-box">
+              <label htmlFor="notes-search" className="search-label">Search</label>
+              <input
+                id="notes-search"
+                type="text"
+                placeholder="Search by topic, question, tag, or language"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
-
-            <div className="filter-group">
-              <label>Category:</label>
-              <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value as Category | 'all')}>
-                <option value="all">All Categories</option>
-                {CATEGORIES.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {availableLanguages.length > 0 && (
-              <div className="filter-group">
-                <label>Language:</label>
-                <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)}>
-                  <option value="all">All Languages</option>
-                  {availableLanguages.map((lang) => (
-                    <option key={lang} value={lang}>
-                      {lang}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             {isFiltered && (
               <button
                 className="btn-clear-filters"
-                onClick={() => {
-                  setSearchTerm('');
-                  setFilterType('all');
-                  setFilterCategory('all');
-                  setFilterLanguage('all');
-                  setRemotePage(1);
-                }}
+                onClick={handleClearFilters}
               >
-                ✕ Clear
+                Clear filters
               </button>
+            )}
+          </div>
+
+          <div className="filters-toolbar">
+            <span className="filters-toolbar-label">Filter by</span>
+
+            <div className="filter-row">
+              <div className="filter-group">
+                <label>Type</label>
+                <select value={filterType} onChange={(e) => setFilterType(e.target.value as NoteType | 'all')}>
+                  <option value="all">All types</option>
+                  {NOTE_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.icon} {type.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="filter-group">
+                <label>Category</label>
+                <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value as Category | 'all')}>
+                  <option value="all">All categories</option>
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {availableLanguages.length > 0 && (
+                <div className="filter-group">
+                  <label>Language</label>
+                  <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)}>
+                    <option value="all">All languages</option>
+                    {availableLanguages.map((lang) => (
+                      <option key={lang} value={lang}>
+                        {lang}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="results-strip">
+            <span className="results-count">
+              Showing {displayedCount} result{displayedCount === 1 ? '' : 's'}
+            </span>
+            {isFiltered && (
+              <span className="results-hint">Filtered view is active</span>
             )}
           </div>
         </div>

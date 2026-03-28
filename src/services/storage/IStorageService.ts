@@ -13,6 +13,9 @@ export interface IStorageService {
   updateNote(id: string, updates: Partial<Note>): Promise<Note>;
   deleteNote(id: string): Promise<void>;
 
+  // Assets
+  uploadImage(file: File): Promise<string>;
+
   // Folders operations
   getFolders(): Promise<Folder[]>;
   getFolder(id: string): Promise<Folder | null>;

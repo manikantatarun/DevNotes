@@ -1,79 +1,132 @@
 # DevNotes
 
-A modern note-taking app for developers to store code snippets and technical notes.
+DevNotes is an interview-focused developer notes app for storing Q&A, coding solutions, and markdown blog notes with GitHub-backed persistence.
 
-## 🚀 Features
+Live app: https://manikantatarun.github.io/DevNotes/
 
-- Create, edit, and organize coding notes
-- Folder organization
-- Syntax highlighting for multiple languages
-- Tag-based categorization
-- Local storage with easy backend migration
+## Features
 
-## 📁 Project Structure
+- Note types: Q&A, Coding, Blog
+- Filtered search (type, category, language, text)
+- In-view note navigation (previous/next within current filtered scope)
+- Markdown blog editor with live preview
+- Rich blog authoring actions (headings, lists, links, code blocks)
+- Blog image upload support
+  - Signed-in GitHub mode: uploads image files into the data repository
+  - Local mode: embeds images as data URLs
+- GitHub OAuth sign-in with read/write access checks
+- Scalable metadata indexing in Cloudflare KV
 
+## Architecture Overview
+
+### Frontend
+
+- React + TypeScript + Vite
+- Main note UX in [src/components/features](src/components/features)
+- Authentication state in [src/context/AuthContext.tsx](src/context/AuthContext.tsx)
+
+### Storage Layer
+
+The app uses a storage abstraction via [src/services/storage/IStorageService.ts](src/services/storage/IStorageService.ts).
+
+Current implementations:
+
+- [src/services/storage/GitHubStorageService.ts](src/services/storage/GitHubStorageService.ts)
+  - Notes stored as `notes/{id}.json`
+  - Metadata stored as `meta/{id}.json`
+  - Blog images stored under `images/YYYY/MM/...`
+- [src/services/storage/LocalStorageService.ts](src/services/storage/LocalStorageService.ts)
+
+### Cloudflare Worker
+
+Worker source: [cloudflare-worker/worker.js](cloudflare-worker/worker.js)
+
+Responsibilities:
+
+- OAuth code exchange (`POST /oauth/token`)
+- Metadata query endpoint (`GET /notes/meta`)
+- CRUD endpoints for authenticated writers
+- KV metadata index bootstrap/sync
+
+#### Auto Sync Behavior
+
+- **First bootstrap**: if KV is empty, metadata is loaded from jsDelivr CDN.
+- **Scheduled sync**: Cloudflare cron runs hourly (configured in [cloudflare-worker/wrangler.toml](cloudflare-worker/wrangler.toml)).
+- **Manual sync endpoint**: `POST /notes/sync` refreshes from GitHub API using an authenticated token.
+
+## Repository Structure
+
+```text
+.
+├── cloudflare-worker/         # Worker + Wrangler config
+├── src/                       # Frontend source
+│   ├── components/
+│   ├── context/
+│   ├── hooks/
+│   ├── services/storage/
+│   ├── config/
+│   ├── constants/
+│   ├── types/
+│   └── utils/
+└── .github/workflows/         # CI/CD (Pages deploy)
 ```
-src/
-├── types/              # TypeScript interfaces and types
-├── services/           # Business logic and storage abstraction
-│   └── storage/        # Storage implementations (localStorage, Firebase, etc.)
-├── hooks/              # Custom React hooks
-├── components/         # React components
-├── utils/              # Utility functions
-├── config/             # Configuration files
-└── constants/          # Application constants
-```
 
-## 🔧 Architecture
+## Environment Configuration
 
-### Storage Abstraction Layer
+Frontend build variables (GitHub Actions repository variables):
 
-The app uses a **storage abstraction pattern** that allows you to switch between different storage backends without changing your application code:
+- `VITE_GITHUB_CLIENT_ID`
+- `VITE_OAUTH_WORKER_URL`
+- `VITE_DATA_REPO_OWNER`
+- `VITE_DATA_REPO_NAME`
+- `VITE_DATA_REPO_BRANCH`
+- `VITE_APP_BASE_URL`
 
-- **Current**: LocalStorage (browser-based)
-- **Future options**: Firebase, Supabase, MongoDB Atlas, PocketBase
+Worker config and secrets:
 
-To switch storage backends, simply implement `IStorageService` interface and update the factory in `src/services/storage/index.ts`.
+- Vars in [cloudflare-worker/wrangler.toml](cloudflare-worker/wrangler.toml)
+- Required secret: `GITHUB_CLIENT_SECRET`
 
-### Usage Example
-
-```typescript
-import { useNotes } from './hooks/useNotes';
-
-function MyComponent() {
-  const { notes, createNote, updateNote, deleteNote } = useNotes();
-  
-  // Your component logic - storage abstraction handles everything!
-}
-```
-
-## 🛠️ Development
+Set worker secret:
 
 ```bash
-# Install dependencies
+cd cloudflare-worker
+npx wrangler secret put GITHUB_CLIENT_SECRET
+```
+
+## Development
+
+```bash
 npm install
-
-# Run development server
 npm run dev
+```
 
-# Build for production
+Build:
+
+```bash
 npm run build
+```
 
-# Deploy to GitHub Pages
+Deploy frontend to GitHub Pages:
+
+```bash
 npm run deploy
 ```
 
-## 📦 Deployment
+## CI/CD
 
-Deployed to GitHub Pages: `https://manikantatarun.github.io/DevNotes/`
+GitHub Pages workflow: [.github/workflows/deploy.yml](.github/workflows/deploy.yml)
 
-## 🔄 Migrating Storage Backends
+- Build + lint on PRs to `main`
+- Deploy on pushes to `main`/`release` branches and on published GitHub Releases
+- Uses repository variables for all Vite config
 
-1. Create a new class implementing `IStorageService` (see `LocalStorageService.ts`)
-2. Update `src/services/storage/index.ts` to use your new implementation
-3. No changes needed in components or hooks!
+## Notes
 
-## 📝 License
+- CDN-based metadata sync can be stale briefly due to CDN cache propagation.
+- Manual sync is available when immediate freshness is required.
+
+## License
 
 MIT
 ```

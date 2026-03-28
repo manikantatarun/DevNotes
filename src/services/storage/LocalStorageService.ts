@@ -15,6 +15,27 @@ export class LocalStorageService implements IStorageService {
     return `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  private readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error('Failed to read image data'));
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Failed to read image file'));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  }
+
   private getFromStorage<T>(key: string): T[] {
     try {
       const data = localStorage.getItem(key);
@@ -83,6 +104,14 @@ export class LocalStorageService implements IStorageService {
     const notes = await this.getNotes();
     const filtered = notes.filter(note => note.id !== id);
     this.saveToStorage(STORAGE_KEYS.NOTES, filtered);
+  }
+
+  async uploadImage(file: File): Promise<string> {
+    if (!file.type.startsWith('image/')) {
+      throw new Error('Please select a valid image file');
+    }
+
+    return this.readFileAsDataUrl(file);
   }
 
   // Folders operations

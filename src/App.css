@@ -2,8 +2,9 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  /* max-width: 1240px; */
-  /* margin: 0 auto; */
+  /* max-width: 1380px; */
+  width: 100%;
+  margin: 0 auto;
   padding: 0 24px;
 }
 
@@ -22,6 +23,27 @@
   text-align: left;
 }
 
+.app-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.app-brand-badge {
+  width: 2.15rem;
+  height: 2.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #e6ebff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 6px 14px rgba(84, 99, 184, 0.35);
+}
+
 .app-header h1 {
   font-size: 2.5rem;
   margin: 0;
@@ -32,29 +54,64 @@
 }
 
 .app-header p {
-  color: #9aa0a6;
+  color: #a8afba;
   margin: 0.35rem 0 0;
   font-size: 1rem;
+  max-width: 56ch;
 }
 
 .app-main {
   flex: 1;
-  padding: 0.75rem 0 1rem;
+  padding: 0.75rem 0 1.5rem;
 }
 
 .app-footer {
   text-align: center;
-  padding: 1.15rem 0 1.3rem;
+  padding: 1.25rem 0 1.35rem;
   border-top: 1px solid #2f3340;
   margin-top: 1.5rem;
   color: #8b9099;
   font-size: 0.9rem;
 }
 
+.app-footer-brand {
+  margin-bottom: 0.45rem;
+  color: #a9b3c2;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-footer-title {
+  margin: 0;
+  color: #c5ccd6;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.app-footer-subtitle {
+  margin: 0.35rem 0 0;
+  color: #9299a5;
+  font-size: 0.88rem;
+}
+
+.app-footer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
+.app-footer-links span {
+  color: #616877;
+}
+
 .app-footer a {
   color: #667eea;
   text-decoration: none;
   transition: color 0.2s;
+  font-weight: 600;
 }
 
 .app-footer a:hover {
@@ -68,6 +125,17 @@
 
   .app-header h1 {
     font-size: 2rem;
+  }
+
+  .app-brand-badge {
+    width: 1.95rem;
+    height: 1.95rem;
+    border-radius: 9px;
+    font-size: 0.74rem;
+  }
+
+  .app-footer {
+    padding-bottom: 1.1rem;
   }
 }
 
