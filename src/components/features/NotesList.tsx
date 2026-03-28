@@ -1,6 +1,6 @@
 import { useNotes } from '../../hooks/useNotes';
 import { useEffect, useMemo, useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
@@ -29,6 +29,8 @@ interface WorkerMetaResponse {
   totalPages: number;
   rows: WorkerMetaRow[];
 }
+
+type NoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
 
 export function NotesList() {
   const { storageService, hasWriteAccess } = useAuth();
@@ -63,7 +65,7 @@ export function NotesList() {
     return [...langs].sort();
   }, [notes]);
 
-  const handleCreateNote = async (noteData: any) => {
+  const handleCreateNote = async (noteData: NoteInput) => {
     try {
       await createNote(noteData);
       setShowForm(false);
@@ -72,7 +74,7 @@ export function NotesList() {
     }
   };
 
-  const handleUpdateNote = async (noteData: any) => {
+  const handleUpdateNote = async (noteData: NoteInput) => {
     if (!editingNote) return;
     try {
       const updated = await updateNote(editingNote.id, noteData);
