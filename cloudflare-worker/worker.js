@@ -349,24 +349,26 @@ async function fetchMetaIndexViaGitHubAPI(env, token) {
 async function fetchMetaIndexFromCDN(env) {
   const { owner, repo, branch } = getRepoConfig(env);
 
-  // Use commit SHA if available (better), fallback to timestamp
   const version = env.GIT_COMMIT_SHA || Date.now();
 
-  // jsDelivr API (cache-busted)
   const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat?v=${version}`;
+
+  console.log(`[DEBUG] Fetching index: ${jsdUrl}`);
 
   const jsdRes = await fetch(jsdUrl);
 
   if (!jsdRes.ok) {
-    throw new Error(
-      `Failed to list metadata files from jsDelivr (${jsdRes.status})`
-    );
+    throw new Error(`Failed to list metadata files (${jsdRes.status})`);
   }
 
   const flat = await jsdRes.json();
+
+  console.log("[DEBUG] Raw flat response:", JSON.stringify(flat, null, 2));
+
   const files = Array.isArray(flat.files) ? flat.files : [];
 
-  // ✅ Extract meta file paths correctly
+  console.log(`[DEBUG] Total files from API: ${files.length}`);
+
   const metaPaths = files
     .map((file) => file.name)
     .filter(
@@ -375,54 +377,68 @@ async function fetchMetaIndexFromCDN(env) {
         name.startsWith("/meta/") &&
         name.endsWith(".json")
     )
-    .map((name) => name.replace(/^\/+/, "")); // remove leading "/"
+    .map((name) => name.replace(/^\/+/, ""));
 
-  console.log(`[CDN] Found ${metaPaths.length} meta files`);
+  console.log("[DEBUG] Meta paths detected:", metaPaths);
 
   const baseCdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}`;
 
-  const chunkSize = 10;
+  const chunkSize = 5; // smaller for debugging
   const allMeta = [];
 
   for (let i = 0; i < metaPaths.length; i += chunkSize) {
     const chunk = metaPaths.slice(i, i + chunkSize);
 
+    console.log(`[DEBUG] Processing chunk:`, chunk);
+
     const rows = await Promise.all(
       chunk.map(async (path) => {
         const url = `${baseCdn}/${path}?v=${version}`;
 
+        console.log(`[DEBUG] Fetching CDN: ${url}`);
+
         try {
           const res = await fetch(url);
 
+          console.log(
+            `[DEBUG] Response status for ${path}: ${res.status}`
+          );
+
           if (!res.ok) {
-            console.warn(`[CDN] Failed ${res.status} for ${url}`);
+            const text = await res.text();
+            console.warn(`[DEBUG] Failed response body:`, text);
             return null;
           }
 
           const data = await res.json();
+
+          console.log(
+            `[DEBUG] Data from ${path}:`,
+            JSON.stringify(data, null, 2)
+          );
+
           return data;
         } catch (err) {
-          console.warn(`[CDN] Error fetching ${url}`, err);
+          console.error(`[DEBUG] Error fetching ${path}:`, err);
           return null;
         }
       })
     );
 
-    // ✅ Push ALL valid rows (not just ones with id)
     for (const row of rows) {
-      if (row && typeof row === "object") {
-        allMeta.push(row);
-      }
+      if (row) allMeta.push(row);
     }
   }
 
-  // ✅ Sort safely
-  allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  console.log(
+    `[DEBUG] Final metadata count: ${allMeta.length}`
+  );
 
-  console.log(`[CDN] Parsed ${allMeta.length} metadata entries`);
+  allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
   return allMeta;
 }
+
 async function kvDeleteByPrefix(env, prefix) {
   let cursor = undefined;
   do {
