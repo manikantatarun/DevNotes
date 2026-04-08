@@ -20,7 +20,7 @@ id = "231ac68fcc8945b3b2a792be840c7cc5"
 preview_id = "79255b16a1234e7b85d1843aa22f1eb0"
 
 [triggers]
-crons = ["*/5 * * * *"]  # Every 5 minute
+crons = ["*/1 * * * *"]  # Every 5 minute
 
 [observability]
 [observability.logs]
