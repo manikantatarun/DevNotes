@@ -353,9 +353,7 @@ async function fetchMetaIndexFromCDN(env) {
 
   const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat?v=${version}`;
 
-  const jsdRes = await fetch(jsdUrl, {
-    cache: "no-store",
-  });
+  const jsdRes = await fetch(jsdUrl);
 
   if (!jsdRes.ok) {
     throw new Error(`Failed to list metadata files from jsDelivr (${jsdRes.status})`);
@@ -381,9 +379,7 @@ async function fetchMetaIndexFromCDN(env) {
     const rows = await Promise.all(
       chunk.map(async (path) => {
         try {
-          const res = await fetch(`${baseCdn}/${path}?v=${version}`, {
-            cache: "no-store",
-          });
+          const res = await fetch(`${baseCdn}/${path}?v=${version}`); // ✅ FIXED
 
           if (!res.ok) return null;
 
