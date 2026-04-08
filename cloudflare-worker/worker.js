@@ -349,24 +349,35 @@ async function fetchMetaIndexViaGitHubAPI(env, token) {
 async function fetchMetaIndexFromCDN(env) {
   const { owner, repo, branch } = getRepoConfig(env);
 
-  const version = Date.now();
+  // Use commit SHA if available (better), fallback to timestamp
+  const version = env.GIT_COMMIT_SHA || Date.now();
 
+  // jsDelivr API (cache-busted)
   const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat?v=${version}`;
 
   const jsdRes = await fetch(jsdUrl);
 
   if (!jsdRes.ok) {
-    throw new Error(`Failed to list metadata files from jsDelivr (${jsdRes.status})`);
+    throw new Error(
+      `Failed to list metadata files from jsDelivr (${jsdRes.status})`
+    );
   }
 
   const flat = await jsdRes.json();
-
   const files = Array.isArray(flat.files) ? flat.files : [];
 
+  // ✅ Extract meta file paths correctly
   const metaPaths = files
     .map((file) => file.name)
-    .filter((name) => typeof name === "string" && name.startsWith("/meta/") && name.endsWith(".json"))
-    .map((name) => name.slice(1));
+    .filter(
+      (name) =>
+        typeof name === "string" &&
+        name.startsWith("/meta/") &&
+        name.endsWith(".json")
+    )
+    .map((name) => name.replace(/^\/+/, "")); // remove leading "/"
+
+  console.log(`[CDN] Found ${metaPaths.length} meta files`);
 
   const baseCdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}`;
 
@@ -378,29 +389,40 @@ async function fetchMetaIndexFromCDN(env) {
 
     const rows = await Promise.all(
       chunk.map(async (path) => {
+        const url = `${baseCdn}/${path}?v=${version}`;
+
         try {
-          const res = await fetch(`${baseCdn}/${path}?v=${version}`); // ✅ FIXED
+          const res = await fetch(url);
 
-          if (!res.ok) return null;
+          if (!res.ok) {
+            console.warn(`[CDN] Failed ${res.status} for ${url}`);
+            return null;
+          }
 
-          return await res.json();
+          const data = await res.json();
+          return data;
         } catch (err) {
-          console.warn(`Failed to fetch ${path}`, err);
+          console.warn(`[CDN] Error fetching ${url}`, err);
           return null;
         }
       })
     );
 
+    // ✅ Push ALL valid rows (not just ones with id)
     for (const row of rows) {
-      if (row?.id) allMeta.push(row);
+      if (row && typeof row === "object") {
+        allMeta.push(row);
+      }
     }
   }
 
+  // ✅ Sort safely
   allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  console.log(`[CDN] Parsed ${allMeta.length} metadata entries`);
 
   return allMeta;
 }
-
 async function kvDeleteByPrefix(env, prefix) {
   let cursor = undefined;
   do {
