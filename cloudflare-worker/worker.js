@@ -351,71 +351,68 @@ async function fetchMetaIndexFromCDN(env) {
 
   const version = env.GIT_COMMIT_SHA || Date.now();
 
-  const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat?v=${version}`;
+  // ✅ STEP 1: Get file list from GitHub
+  const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
 
-  console.log(`[DEBUG] Fetching index: ${jsdUrl}`);
+  const treeRes = await fetch(treeUrl, {
+    headers: env.GITHUB_TOKEN
+      ? { Authorization: `Bearer ${env.GITHUB_TOKEN}` }
+      : {},
+  });
 
-  const jsdRes = await fetch(jsdUrl);
-
-  if (!jsdRes.ok) {
-    throw new Error(`Failed to list metadata files (${jsdRes.status})`);
+  if (!treeRes.ok) {
+    throw new Error(`GitHub tree fetch failed (${treeRes.status})`);
   }
 
-  const flat = await jsdRes.json();
-
-  console.log("[DEBUG] Raw flat response:", JSON.stringify(flat, null, 2));
-
-  const files = Array.isArray(flat.files) ? flat.files : [];
-
-  console.log(`[DEBUG] Total files from API: ${files.length}`);
+  const treeData = await treeRes.json();
+  const files = Array.isArray(treeData.tree) ? treeData.tree : [];
 
   const metaPaths = files
-    .map((file) => file.name)
+    .map((file) => file.path)
     .filter(
-      (name) =>
-        typeof name === "string" &&
-        name.startsWith("/meta/") &&
-        name.endsWith(".json")
-    )
-    .map((name) => name.replace(/^\/+/, ""));
+      (path) =>
+        typeof path === "string" &&
+        path.startsWith("meta/") &&
+        path.endsWith(".json")
+    );
 
-  console.log("[DEBUG] Meta paths detected:", metaPaths);
+  console.log(`[DEBUG] Meta paths:`, metaPaths);
 
+  // ✅ STEP 2: Setup CDN + RAW fallback
   const baseCdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}`;
+  const baseRaw = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
 
-  const chunkSize = 5; // smaller for debugging
+  const chunkSize = 5;
   const allMeta = [];
 
   for (let i = 0; i < metaPaths.length; i += chunkSize) {
     const chunk = metaPaths.slice(i, i + chunkSize);
 
-    console.log(`[DEBUG] Processing chunk:`, chunk);
-
     const rows = await Promise.all(
       chunk.map(async (path) => {
-        const url = `${baseCdn}/${path}?v=${version}`;
-
-        console.log(`[DEBUG] Fetching CDN: ${url}`);
+        const cdnUrl = `${baseCdn}/${path}?v=${version}`;
+        const rawUrl = `${baseRaw}/${path}`;
 
         try {
-          const res = await fetch(url);
+          console.log(`[DEBUG] Trying CDN: ${cdnUrl}`);
 
-          console.log(
-            `[DEBUG] Response status for ${path}: ${res.status}`
-          );
+          let res = await fetch(cdnUrl);
+
+          // 🔥 Fallback if CDN fails
+          if (!res.ok) {
+            console.warn(`[DEBUG] CDN failed (${res.status}), fallback to RAW`);
+
+            res = await fetch(rawUrl);
+          }
 
           if (!res.ok) {
-            const text = await res.text();
-            console.warn(`[DEBUG] Failed response body:`, text);
+            console.warn(`[DEBUG] RAW also failed (${res.status})`);
             return null;
           }
 
           const data = await res.json();
 
-          console.log(
-            `[DEBUG] Data from ${path}:`,
-            JSON.stringify(data, null, 2)
-          );
+          console.log(`[DEBUG] Data from ${path}:`, data);
 
           return data;
         } catch (err) {
@@ -426,15 +423,15 @@ async function fetchMetaIndexFromCDN(env) {
     );
 
     for (const row of rows) {
-      if (row) allMeta.push(row);
+      if (row && typeof row === "object") {
+        allMeta.push(row);
+      }
     }
   }
 
-  console.log(
-    `[DEBUG] Final metadata count: ${allMeta.length}`
-  );
-
   allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  console.log(`[DEBUG] Final metadata count: ${allMeta.length}`);
 
   return allMeta;
 }
