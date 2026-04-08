@@ -206,7 +206,7 @@ export class GitHubStorageService implements IStorageService {
 
   private async cdnGet<T>(path: string): Promise<T | null> {
     // Add a cache-bust only for meta (fresh data); notes are immutable until edited
-    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@${this.cfg.branch}/${path}`;
+    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@latest/${path}`;
     const res = await fetch(url);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`CDN fetch error ${res.status} on ${path}`);
