@@ -348,43 +348,60 @@ async function fetchMetaIndexViaGitHubAPI(env, token) {
 // Fetch meta index via jsDelivr CDN (no auth needed, may be stale — only for bootstrap)
 async function fetchMetaIndexFromCDN(env) {
   const { owner, repo, branch } = getRepoConfig(env);
-  const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat`;
-  const jsdRes = await fetch(jsdUrl);
+
+  const version = Date.now();
+
+  const jsdUrl = `https://data.jsdelivr.com/v1/package/gh/${owner}/${repo}@${branch}/flat?v=${version}`;
+
+  const jsdRes = await fetch(jsdUrl, {
+    cache: "no-store",
+  });
 
   if (!jsdRes.ok) {
     throw new Error(`Failed to list metadata files from jsDelivr (${jsdRes.status})`);
   }
 
   const flat = await jsdRes.json();
+
   const files = Array.isArray(flat.files) ? flat.files : [];
+
   const metaPaths = files
     .map((file) => file.name)
-    .filter((name) => typeof name === 'string' && name.startsWith('/meta/') && name.endsWith('.json'))
+    .filter((name) => typeof name === "string" && name.startsWith("/meta/") && name.endsWith(".json"))
     .map((name) => name.slice(1));
 
   const baseCdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}`;
-  const chunkSize = 16;
+
+  const chunkSize = 10;
   const allMeta = [];
 
   for (let i = 0; i < metaPaths.length; i += chunkSize) {
     const chunk = metaPaths.slice(i, i + chunkSize);
+
     const rows = await Promise.all(
       chunk.map(async (path) => {
         try {
-          const res = await fetch(`${baseCdn}/${path}`);
+          const res = await fetch(`${baseCdn}/${path}?v=${version}`, {
+            cache: "no-store",
+          });
+
           if (!res.ok) return null;
+
           return await res.json();
-        } catch {
+        } catch (err) {
+          console.warn(`Failed to fetch ${path}`, err);
           return null;
         }
-      }),
+      })
     );
+
     for (const row of rows) {
       if (row?.id) allMeta.push(row);
     }
   }
 
   allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
   return allMeta;
 }
 
