@@ -6,14 +6,17 @@
 // Cache keys
 export const CACHE_KEYS = {
   GITHUB_APP_TOKEN: 'github:app:token',
-  CDN_NOTE_PREFIX: 'cdn:note:',
+  D1_QUERY_PREFIX: 'd1:query:',
+  POPULAR_TAGS: 'tags:popular',
+  TAG_FILTER_PREFIX: 'filter:tag:',
 };
 
 // Cache TTL (seconds)
 export const CACHE_TTL = {
-  CDN_CONTENT: 300,        // 5 minutes
   GITHUB_APP_TOKEN: 3600,  // 1 hour (max)
-  D1_QUERY: 30,            // 30 seconds
+  D1_QUERY: 60,            // 1 minute
+  POPULAR_TAGS: 300,       // 5 minutes
+  TAG_FILTER: 2592000,     // 30 days for filter tracking
 };
 
 // Pagination defaults
@@ -55,9 +58,9 @@ export function getRepoConfig(env) {
 }
 
 /**
- * Get CORS origin from environment
+ * Get allowed CORS origin from environment
  * @param {Object} env - Worker environment bindings
- * @returns {string} CORS origin
+ * @returns {string} Allowed origin
  */
 export function getAllowedOrigin(env) {
   return env.ALLOWED_ORIGIN || '*';

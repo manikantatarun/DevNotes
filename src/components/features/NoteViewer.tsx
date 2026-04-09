@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDateTime } from '../../utils';
+import { FilterBar } from './FilterBar';
 import './NoteViewer.css';
 
 interface NoteTypeOption {
@@ -32,13 +33,17 @@ interface NoteViewerProps {
   onSearchTermChange: (value: string) => void;
   filterType: NoteType | 'all';
   onFilterTypeChange: (value: NoteType | 'all') => void;
-  filterCategory: Category | 'all';
-  onFilterCategoryChange: (value: Category | 'all') => void;
-  filterLanguage: string;
-  onFilterLanguageChange: (value: string) => void;
+  filterCategories: Category[];
+  onFilterCategoriesChange: (value: Category[]) => void;
+  filterLanguages: string[];
+  onFilterLanguagesChange: (value: string[]) => void;
+  filterTags: string[];
+  onFilterTagsChange: (value: string[]) => void;
   availableLanguages: string[];
+  availableTags: string[];
+  popularTags: string[];
   noteTypeOptions: readonly NoteTypeOption[];
-  categoryOptions: readonly CategoryOption[];
+  categoryOptions?: readonly CategoryOption[];  // Optional now
   isFiltered: boolean;
   onClearFilters: () => void;
   canEdit?: boolean;
@@ -60,24 +65,41 @@ export function NoteViewer({
   onSearchTermChange,
   filterType,
   onFilterTypeChange,
-  filterCategory,
-  onFilterCategoryChange,
-  filterLanguage,
-  onFilterLanguageChange,
+  filterCategories,
+  onFilterCategoriesChange,
+  filterLanguages,
+  onFilterLanguagesChange,
   availableLanguages,
-  noteTypeOptions,
-  categoryOptions,
+  filterTags,
+  onFilterTagsChange,
+  availableTags: _availableTags,
+  popularTags,
+  noteTypeOptions: _noteTypeOptions,
+  categoryOptions: _categoryOptions,
   isFiltered,
   onClearFilters,
   canEdit = false,
 }: NoteViewerProps) {
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [showCopyFeedback, setShowCopyFeedback] = useState(false);
   const [isMobileView, setIsMobileView] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.matchMedia('(max-width: 768px)').matches;
   });
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/DevNotes/note/${note.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShowCopyFeedback(true);
+      setTimeout(() => setShowCopyFeedback(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy URL:', err);
+      // Fallback: show URL in prompt
+      prompt('Copy this URL:', url);
+    }
+  };
 
   const slideClass = navigationDirection === 'next'
     ? 'note-viewer-slide-next'
@@ -191,96 +213,54 @@ export function NoteViewer({
           {scopeLabel && <span className="viewer-scope">{scopeLabel}</span>}
         </div>
 
-        {canEdit && (
-          <div className="viewer-write-actions">
-            <button className="btn-edit-viewer" onClick={onEdit}>
-              ✏️ Edit
-            </button>
-            <button
-              className="btn-delete-viewer"
-              onClick={() => {
-                if (confirm('Are you sure you want to delete this note?')) {
-                  onDelete();
-                }
-              }}
-            >
-              🗑️ Delete
-            </button>
-          </div>
-        )}
+        <div className="viewer-right-actions">
+          <button 
+            className="btn-share" 
+            onClick={handleShare}
+            title="Copy link to share this note"
+          >
+            {showCopyFeedback ? '✓ Copied!' : '🔗 Share'}
+          </button>
+          
+          {canEdit && (
+            <>
+              <button className="btn-edit-viewer" onClick={onEdit}>
+                ✏️ Edit
+              </button>
+              <button
+                className="btn-delete-viewer"
+                onClick={() => {
+                  if (confirm('Are you sure you want to delete this note?')) {
+                    onDelete();
+                  }
+                }}
+              >
+                🗑️ Delete
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="viewer-filters">
-        <button
-          className="viewer-filters-toggle"
-          type="button"
-          aria-expanded={mobileFiltersOpen}
-          onClick={() => setMobileFiltersOpen((prev) => !prev)}
-        >
-          {mobileFiltersOpen ? 'Hide Filters' : 'Show Filters'}
-        </button>
-
-        <div className={`viewer-filters-content ${mobileFiltersOpen ? 'is-open' : ''}`}>
-          <div className="viewer-search-box">
-          <label htmlFor="viewer-search" className="viewer-filter-label">Search</label>
-          <input
-            id="viewer-search"
-            type="text"
-            placeholder="Search by topic, question, tag, or language"
-            value={searchTerm}
-            onChange={(event) => onSearchTermChange(event.target.value)}
-          />
-          </div>
-
-          <div className="viewer-filter-row">
-            <div className="viewer-filter-group">
-              <label>Type</label>
-              <select value={filterType} onChange={(event) => onFilterTypeChange(event.target.value as NoteType | 'all')}>
-                <option value="all">All types</option>
-                {noteTypeOptions.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.icon} {type.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="viewer-filter-group">
-              <label>Category</label>
-              <select
-                value={filterCategory}
-                onChange={(event) => onFilterCategoryChange(event.target.value as Category | 'all')}
-              >
-                <option value="all">All categories</option>
-                {categoryOptions.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {availableLanguages.length > 0 && (
-              <div className="viewer-filter-group">
-                <label>Language</label>
-                <select value={filterLanguage} onChange={(event) => onFilterLanguageChange(event.target.value)}>
-                  <option value="all">All languages</option>
-                  {availableLanguages.map((language) => (
-                    <option key={language} value={language}>
-                      {language}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {isFiltered && (
-              <button className="viewer-btn-clear-filters" onClick={onClearFilters}>
-                Clear filters
-              </button>
-            )}
-          </div>
-        </div>
+        <FilterBar
+          searchTerm={searchTerm}
+          onSearchTermChange={onSearchTermChange}
+          filterType={filterType}
+          onFilterTypeChange={onFilterTypeChange}
+          filterCategories={filterCategories}
+          onFilterCategoriesChange={onFilterCategoriesChange}
+          filterLanguages={filterLanguages}
+          onFilterLanguagesChange={onFilterLanguagesChange}
+          availableLanguages={availableLanguages}
+          filterTags={filterTags}
+          onFilterTagsChange={onFilterTagsChange}
+          popularTags={popularTags}
+          isFiltered={isFiltered}
+          onClearFilters={onClearFilters}
+          remoteLoading={false}
+          displayedCount={1}
+        />
       </div>
 
       <button
@@ -339,7 +319,19 @@ export function NoteViewer({
         {note.tags && note.tags.length > 0 && (
           <div className="viewer-tags">
             {note.tags.map((tag) => (
-              <span key={tag} className="viewer-tag">#{tag}</span>
+              <span 
+                key={tag} 
+                className="viewer-tag clickable"
+                onClick={() => {
+                  if (onFilterTagsChange) {
+                    onFilterTagsChange([tag]);
+                    onClose();
+                  }
+                }}
+                title="Click to filter by this tag"
+              >
+                #{tag}
+              </span>
             ))}
           </div>
         )}

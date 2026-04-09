@@ -6,10 +6,11 @@ interface NoteCardProps {
   note: Note;
   onDelete: (id: string) => void;
   onClick: (note: Note) => void;
+  onTagClick?: (tag: string) => void;
   canEdit?: boolean;
 }
 
-export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onClick, onTagClick, canEdit = false }: NoteCardProps) {
   const codingLanguages = note.type === 'coding'
     ? note.solutions?.map((item) => item.language) || (note.language ? [note.language] : [])
     : [];
@@ -76,7 +77,17 @@ export function NoteCard({ note, onDelete, onClick, canEdit = false }: NoteCardP
       {note.tags && note.tags.length > 0 && (
         <div className="note-tags">
           {note.tags.slice(0, 3).map((tag) => (
-            <span key={tag} className="note-tag">#{tag}</span>
+            <span 
+              key={tag} 
+              className="note-tag"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTagClick?.(tag);
+              }}
+              style={{ cursor: onTagClick ? 'pointer' : 'default' }}
+            >
+              #{tag}
+            </span>
           ))}
           {note.tags.length > 3 && (
             <span className="note-tag-more">+{note.tags.length - 3} more</span>
