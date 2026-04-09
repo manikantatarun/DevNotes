@@ -379,14 +379,17 @@ async function d1QueryMeta(env, params) {
   if (type && type !== 'all') {
     countQuery += ' AND type = ?';
   }
-  if (category && category !== 'all') {
-    countQuery += ' AND category = ?';
+  if (categories.length > 0) {
+    const placeholders = categories.map(() => '?').join(',');
+    countQuery += ` AND category IN (${placeholders})`;
   }
-  if (language && language !== 'all') {
-    countQuery += ' AND (language = ? OR languages LIKE ?)';
+  if (languages.length > 0) {
+    const langConditions = languages.map(() => '(language = ? OR languages LIKE ?)').join(' OR ');
+    countQuery += ` AND (${langConditions})`;
   }
-  if (tag && tag !== 'all') {
-    countQuery += ' AND tags LIKE ?';
+  if (tags.length > 0) {
+    const tagConditions = tags.map(() => 'tags LIKE ?').join(' OR ');
+    countQuery += ` AND (${tagConditions})`;
   }
   if (q && q.trim()) {
     countQuery += ' AND id IN (SELECT notes_meta.id FROM notes_meta JOIN notes_fts ON notes_meta.rowid = notes_fts.rowid WHERE notes_fts MATCH ?)';
