@@ -1,9 +1,11 @@
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useNotes } from '../../hooks/useNotes';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../context/useAuth';
 import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
+import { FilterBar } from './FilterBar';
 import type { Note, NoteType, Category } from '../../types';
 import { NOTE_TYPES, CATEGORIES } from '../../constants';
 import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
@@ -33,6 +35,9 @@ interface WorkerMetaResponse {
 type NoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
 
 export function NotesList() {
+  const { noteId } = useParams<{ noteId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { storageService, hasWriteAccess } = useAuth();
   const { notes, loading, error, getNote, createNote, updateNote, deleteNote, refresh } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
@@ -40,8 +45,9 @@ export function NotesList() {
   const [viewerNavDirection, setViewerNavDirection] = useState<'prev' | 'next' | null>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [filterType, setFilterType] = useState<NoteType | 'all'>('all');
-  const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
-  const [filterLanguage, setFilterLanguage] = useState<string>('all');
+  const [filterCategories, setFilterCategories] = useState<Category[]>([]);
+  const [filterLanguages, setFilterLanguages] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [remoteNotes, setRemoteNotes] = useState<Note[] | null>(null);
   const [remoteTotal, setRemoteTotal] = useState<number | null>(null);
@@ -52,6 +58,14 @@ export function NotesList() {
   const [remoteError, setRemoteError] = useState<string | null>(null);
 
   const workerConfigured = isWorkerConfigured();
+
+  // Initialize filter from path (/qa, /coding, /blog)
+  useEffect(() => {
+    const path = location.pathname.split('/').pop();
+    if (path === 'qa' || path === 'coding' || path === 'blog') {
+      setFilterType(path);
+    }
+  }, [location.pathname]);
 
   // Derive the set of languages across all notes (for the language dropdown)
   const availableLanguages = useMemo(() => {
@@ -64,6 +78,46 @@ export function NotesList() {
     }
     return [...langs].sort();
   }, [notes]);
+
+  // Get all used tags
+  const allUsedTags = useMemo(() => {
+    return [...new Set(notes.flatMap((n) => n.tags))];
+  }, [notes]);
+
+  // Fetch popular tags from backend (cached with 5min TTL)
+  const [popularTags, setPopularTags] = useState<string[]>([]);
+  useEffect(() => {
+    if (workerConfigured) {
+      fetch(getWorkerUrl(API_ENDPOINTS.TAGS_POPULAR))
+        .then(res => res.json())
+        .then(data => setPopularTags(data.tags || []))
+        .catch(err => console.warn('Failed to fetch popular tags:', err));
+    } else {
+      // Fallback: Time-weighted scoring (same algorithm as backend)
+      const now = Date.now();
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const tagScores = new Map<string, number>();
+      
+      notes.forEach(note => {
+        const ageInDays = (now - note.updatedAt) / DAY_MS;
+        // Time decay weights: 7d=5x, 30d=3x, 90d=2x, older=1x
+        let weight = 1;
+        if (ageInDays <= 7) weight = 5;
+        else if (ageInDays <= 30) weight = 3;
+        else if (ageInDays <= 90) weight = 2;
+        
+        note.tags?.forEach(tag => {
+          tagScores.set(tag, (tagScores.get(tag) || 0) + weight);
+        });
+      });
+      
+      const localPopularTags = Array.from(tagScores.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15)
+        .map(([tag]) => tag);
+      setPopularTags(localPopularTags);
+    }
+  }, [notes, workerConfigured]);
 
   const handleCreateNote = async (noteData: NoteInput) => {
     try {
@@ -89,6 +143,7 @@ export function NotesList() {
   const handleSelectNote = async (note: Note, navigationDirection: 'prev' | 'next' | null = null) => {
     setViewerNavDirection(navigationDirection);
     setSelectedNote(note);
+    navigate(`/note/${note.id}`, { replace: false });
     try {
       const fullNote = await getNote(note.id);
       if (fullNote) {
@@ -99,6 +154,27 @@ export function NotesList() {
     }
   };
 
+  // Load note from URL parameter
+  useEffect(() => {
+    if (noteId && !selectedNote) {
+      const loadNoteFromUrl = async () => {
+        try {
+          const note = await getNote(noteId);
+          if (note) {
+            setSelectedNote(note);
+          } else {
+            // Note not found, redirect to home
+            navigate('/', { replace: true });
+          }
+        } catch (err) {
+          console.error('Failed to load note from URL:', err);
+          navigate('/', { replace: true });
+        }
+      };
+      void loadNoteFromUrl();
+    }
+  }, [noteId, selectedNote, getNote, navigate]);
+
   const filteredNotes = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
 
@@ -106,16 +182,24 @@ export function NotesList() {
       // ── filter by type ────────────────────────────────────────────────────
       if (filterType !== 'all' && note.type !== filterType) return false;
 
-      // ── filter by category ────────────────────────────────────────────────
-      if (filterCategory !== 'all' && note.category !== filterCategory) return false;
+      // ── filter by categories (multi-select) ────────────────────────────────
+      if (filterCategories.length > 0 && !filterCategories.includes(note.category)) return false;
 
-      // ── filter by language ────────────────────────────────────────────────
-      if (filterLanguage !== 'all') {
+      // ── filter by languages (multi-select) ────────────────────────────────
+      if (filterLanguages.length > 0) {
         const noteLangs = [
           note.language,
           ...(note.solutions ?? []).map((s) => s.language),
         ].filter(Boolean);
-        if (!noteLangs.includes(filterLanguage)) return false;
+        const hasMatch = filterLanguages.some(lang => noteLangs.includes(lang));
+        if (!hasMatch) return false;
+      }
+
+      // ── filter by tags (multi-select) ─────────────────────────────────────
+      if (filterTags.length > 0) {
+        const noteTags = note.tags || [];
+        const hasMatch = filterTags.some(tag => noteTags.includes(tag));
+        if (!hasMatch) return false;
       }
 
       // ── full-text search ──────────────────────────────────────────────────
@@ -139,13 +223,14 @@ export function NotesList() {
 
       return true;
     });
-  }, [notes, filterType, filterCategory, filterLanguage, searchTerm]);
+  }, [notes, filterType, filterCategories, filterLanguages, filterTags, searchTerm]);
 
   const isFiltered =
     searchTerm.trim() !== '' ||
     filterType !== 'all' ||
-    filterCategory !== 'all' ||
-    filterLanguage !== 'all';
+    filterCategories.length > 0 ||
+    filterLanguages.length > 0 ||
+    filterTags.length > 0;
   const isRemoteMode = isFiltered && workerConfigured && !remoteError;
 
   function mapWorkerRowToNote(row: WorkerMetaRow): Note {
@@ -169,7 +254,7 @@ export function NotesList() {
 
   useEffect(() => {
     setRemotePage(1);
-  }, [searchTerm, filterType, filterCategory, filterLanguage]);
+  }, [searchTerm, filterType, filterCategories, filterLanguages, filterTags]);
 
   useEffect(() => {
     const onSyncComplete = () => {
@@ -201,8 +286,10 @@ export function NotesList() {
         const params = new URLSearchParams();
         if (searchTerm.trim()) params.set('q', searchTerm.trim());
         if (filterType !== 'all') params.set('type', filterType);
-        if (filterCategory !== 'all') params.set('category', filterCategory);
-        if (filterLanguage !== 'all') params.set('language', filterLanguage);
+        // Send multiple categories as repeated params or comma-separated
+        filterCategories.forEach(cat => params.append('category', cat));
+        filterLanguages.forEach(lang => params.append('language', lang));
+        filterTags.forEach(tag => params.append('tag', tag));
         params.set('page', String(remotePage));
         params.set('pageSize', String(remotePageSize));
 
@@ -241,8 +328,9 @@ export function NotesList() {
     workerConfigured,
     searchTerm,
     filterType,
-    filterCategory,
-    filterLanguage,
+    filterCategories,
+    filterLanguages,
+    filterTags,
     remotePage,
     remotePageSize,
   ]);
@@ -263,11 +351,14 @@ export function NotesList() {
   if (filterType !== 'all') {
     activeScopeParts.push(`type: ${filterType}`);
   }
-  if (filterCategory !== 'all') {
-    activeScopeParts.push(`category: ${filterCategory}`);
+  if (filterCategories.length > 0) {
+    activeScopeParts.push(`categories: ${filterCategories.join(', ')}`);
   }
-  if (filterLanguage !== 'all') {
-    activeScopeParts.push(`language: ${filterLanguage}`);
+  if (filterLanguages.length > 0) {
+    activeScopeParts.push(`languages: ${filterLanguages.join(', ')}`);
+  }
+  if (filterTags.length > 0) {
+    activeScopeParts.push(`tags: ${filterTags.join(', ')}`);
   }
   if (searchTerm.trim()) {
     activeScopeParts.push(`search: ${searchTerm.trim()}`);
@@ -276,6 +367,17 @@ export function NotesList() {
   const viewerScopeLabel = activeScopeParts.length > 0
     ? `Filtered by ${activeScopeParts.join(' · ')}`
     : 'All notes';
+
+  // Close viewer if selected note doesn't match current filters
+  useEffect(() => {
+    if (selectedNote && !remoteLoading) {
+      const isSelectedNoteInFiltered = displayedNotes.some(note => note.id === selectedNote.id);
+      if (!isSelectedNoteInFiltered) {
+        setSelectedNote(null);
+        navigate('/', { replace: false });
+      }
+    }
+  }, [selectedNote, displayedNotes, remoteLoading, navigate]);
 
   const handleNavigateSelectedNote = async (direction: 'prev' | 'next') => {
     if (!selectedNote || displayedNotes.length === 0) return;
@@ -292,16 +394,14 @@ export function NotesList() {
   const handleClearFilters = () => {
     setSearchTerm('');
     setFilterType('all');
-    setFilterCategory('all');
-    setFilterLanguage('all');
+    setFilterCategories([]);
+    setFilterLanguages([]);
+    setFilterTags([]);
     setRemotePage(1);
   };
 
   if (loading) return <div className="notes-container">Loading notes...</div>;
   if (error) return <div className="notes-container error">Error: {error}</div>;
-  if (remoteLoading) return <div className="notes-container">Searching notes...</div>;
-
-  const allUsedTags = [...new Set(notes.flatMap((n) => n.tags))];
 
   if (showForm) {
     return (
@@ -325,6 +425,7 @@ export function NotesList() {
         onClose={() => {
           setViewerNavDirection(null);
           setSelectedNote(null);
+          navigate('/', { replace: false });
         }}
         onPrevious={() => void handleNavigateSelectedNote('prev')}
         onNext={() => void handleNavigateSelectedNote('next')}
@@ -337,11 +438,15 @@ export function NotesList() {
         onSearchTermChange={setSearchTerm}
         filterType={filterType}
         onFilterTypeChange={setFilterType}
-        filterCategory={filterCategory}
-        onFilterCategoryChange={setFilterCategory}
-        filterLanguage={filterLanguage}
-        onFilterLanguageChange={setFilterLanguage}
+        filterCategories={filterCategories}
+        onFilterCategoriesChange={setFilterCategories}
+        filterLanguages={filterLanguages}
+        onFilterLanguagesChange={setFilterLanguages}
+        filterTags={filterTags}
+        onFilterTagsChange={setFilterTags}
         availableLanguages={availableLanguages}
+        availableTags={allUsedTags}
+        popularTags={popularTags}
         noteTypeOptions={NOTE_TYPES}
         categoryOptions={CATEGORIES}
         isFiltered={isFiltered}
@@ -371,82 +476,24 @@ export function NotesList() {
           )}
         </div>
 
-        <div className="filters">
-          <div className="search-row">
-            <div className="search-box">
-              <label htmlFor="notes-search" className="search-label">Search</label>
-              <input
-                id="notes-search"
-                type="text"
-                placeholder="Search by topic, question, tag, or language"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-
-            {isFiltered && (
-              <button
-                className="btn-clear-filters"
-                onClick={handleClearFilters}
-              >
-                Clear filters
-              </button>
-            )}
-          </div>
-
-          <div className="filters-toolbar">
-            <span className="filters-toolbar-label">Filter by</span>
-
-            <div className="filter-row">
-              <div className="filter-group">
-                <label>Type</label>
-                <select value={filterType} onChange={(e) => setFilterType(e.target.value as NoteType | 'all')}>
-                  <option value="all">All types</option>
-                  {NOTE_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.icon} {type.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="filter-group">
-                <label>Category</label>
-                <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value as Category | 'all')}>
-                  <option value="all">All categories</option>
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {availableLanguages.length > 0 && (
-                <div className="filter-group">
-                  <label>Language</label>
-                  <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)}>
-                    <option value="all">All languages</option>
-                    {availableLanguages.map((lang) => (
-                      <option key={lang} value={lang}>
-                        {lang}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="results-strip">
-            <span className="results-count">
-              Showing {displayedCount} result{displayedCount === 1 ? '' : 's'}
-            </span>
-            {isFiltered && (
-              <span className="results-hint">Filtered view is active</span>
-            )}
-          </div>
-        </div>
+        <FilterBar
+          searchTerm={searchTerm}
+          onSearchTermChange={setSearchTerm}
+          filterType={filterType}
+          onFilterTypeChange={setFilterType}
+          filterCategories={filterCategories}
+          onFilterCategoriesChange={setFilterCategories}
+          filterLanguages={filterLanguages}
+          onFilterLanguagesChange={setFilterLanguages}
+          availableLanguages={availableLanguages}
+          filterTags={filterTags}
+          onFilterTagsChange={setFilterTags}
+          popularTags={popularTags}
+          isFiltered={isFiltered}
+          onClearFilters={handleClearFilters}
+          remoteLoading={remoteLoading}
+          displayedCount={displayedCount}
+        />
 
         {remoteError && (
           <div className="search-fallback-note">⚠️ {remoteError}</div>
@@ -461,7 +508,7 @@ export function NotesList() {
           </p>
         </div>
       ) : (
-        <div className="notes-grid">
+        <div className={`notes-grid ${remoteLoading ? 'loading' : ''}`}>
           {displayedNotes.map((note) => (
             <NoteCard
               key={note.id}
@@ -469,6 +516,14 @@ export function NotesList() {
               canEdit={hasWriteAccess}
               onDelete={deleteNote}
               onClick={handleSelectNote}
+              onTagClick={(tag) => {
+                // Toggle tag in filter
+                setFilterTags(prev =>
+                  prev.includes(tag)
+                    ? prev.filter(t => t !== tag)
+                    : [...prev, tag]
+                );
+              }}
             />
           ))}
         </div>

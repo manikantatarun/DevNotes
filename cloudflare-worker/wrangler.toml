@@ -8,7 +8,8 @@ command = ""
 
 # Environment variables
 [vars]
-ALLOWED_ORIGIN   = "https://manikantatarun.github.io"
+# CORS: Comma-separated list of allowed origins, or '*' for all
+ALLOWED_ORIGINS  = "https://manikantatarun.github.io,http://localhost:5173,http://localhost:5174"
 DATA_REPO_OWNER  = "manikantatarun"
 DATA_REPO_NAME   = "devnotes-data"
 DATA_REPO_BRANCH = "main"

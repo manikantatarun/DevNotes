@@ -7,12 +7,16 @@
 export const CACHE_KEYS = {
   GITHUB_APP_TOKEN: 'github:app:token',
   D1_QUERY_PREFIX: 'd1:query:',
+  POPULAR_TAGS: 'tags:popular',
+  TAG_FILTER_PREFIX: 'filter:tag:',
 };
 
 // Cache TTL (seconds)
 export const CACHE_TTL = {
   GITHUB_APP_TOKEN: 3600,  // 1 hour (max)
   D1_QUERY: 60,            // 1 minute
+  POPULAR_TAGS: 300,       // 5 minutes
+  TAG_FILTER: 2592000,     // 30 days for filter tracking
 };
 
 // Pagination defaults
@@ -54,12 +58,58 @@ export function getRepoConfig(env) {
 }
 
 /**
- * Get CORS origin from environment
+ * Get allowed CORS origins from environment
  * @param {Object} env - Worker environment bindings
- * @returns {string} CORS origin
+ * @returns {string[]} Array of allowed origins
+ */
+export function getAllowedOrigins(env) {
+  // Support comma-separated list of origins
+  const originsString = env.ALLOWED_ORIGINS || env.ALLOWED_ORIGIN || '';
+  
+  if (!originsString || originsString === '*') {
+    return ['*'];
+  }
+  
+  return originsString
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Match request origin against allowed origins
+ * @param {string} requestOrigin - Origin from request header
+ * @param {string[]} allowedOrigins - Array of allowed origins
+ * @returns {string} Matched origin or '*'
+ */
+export function getMatchingOrigin(requestOrigin, allowedOrigins) {
+  // If wildcard is allowed, return the request origin (or wildcard if no request origin)
+  if (allowedOrigins.includes('*')) {
+    return requestOrigin || '*';
+  }
+  
+  // If no request origin, return first allowed origin as fallback
+  if (!requestOrigin) {
+    return allowedOrigins[0] || '*';
+  }
+  
+  // Check if request origin is in allowed list
+  if (allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+  
+  // No match found - deny by returning null (caller should handle)
+  // Or return first allowed origin as fallback for development
+  return allowedOrigins[0] || '*';
+}
+
+/**
+ * Legacy function for backward compatibility
+ * @deprecated Use getAllowedOrigins instead
  */
 export function getAllowedOrigin(env) {
-  return env.ALLOWED_ORIGIN || '*';
+  const origins = getAllowedOrigins(env);
+  return origins[0] || '*';
 }
 
 /**

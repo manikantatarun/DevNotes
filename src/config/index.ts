@@ -51,6 +51,7 @@ export const API_ENDPOINTS = {
   NOTES_UPDATE: '/notes/update',
   NOTES_DELETE: '/notes/delete',
   NOTES_GET: (id: string) => `/notes/${id}`,
+  TAGS_POPULAR: '/notes/tags/popular',
 } as const;
 
 // ============================================================================

@@ -8,12 +8,13 @@
  * - jsDelivr CDN: Note content read directly by frontend (not cached here)
  *
  * Endpoints:
- *   POST /oauth/token        - Exchange OAuth code for user token
- *   GET  /notes/meta         - Query metadata from D1 (cached)
- *   POST /notes/sync         - Sync metadata from GitHub to D1 (auth required)
- *   POST /notes/create       - Create new note (auth required)
- *   POST /notes/update       - Update existing note (auth required)
- *   POST /notes/delete       - Delete note (auth required)
+ *   POST /oauth/token         - Exchange OAuth code for user token
+ *   GET  /notes/meta          - Query metadata from D1 (cached, tracks tag filters)
+ *   GET  /notes/tags/popular  - Get popular tags (usage-weighted)
+ *   POST /notes/sync          - Sync metadata from GitHub to D1 (auth required)
+ *   POST /notes/create        - Create new note (auth required)
+ *   POST /notes/update        - Update existing note (auth required)
+ *   POST /notes/delete        - Delete note (auth required)
  */
 
 import { getGitHubAppToken } from './github-app-auth.js';
@@ -24,7 +25,8 @@ import {
   GITHUB,
   WRITE_PERMISSIONS,
   getRepoConfig,
-  getAllowedOrigin,
+  getAllowedOrigins,
+  getMatchingOrigin,
   getOAuthConfig,
   getCDNUrl,
 } from './config.js';
@@ -305,25 +307,32 @@ async function d1QueryMeta(env, params) {
     bindings.push(type);
   }
 
-  // Filter by category
-  const category = normalizeText(params.get('category'));
-  if (category && category !== 'all') {
-    query += ' AND category = ?';
-    bindings.push(category);
+  // Filter by categories (multi-select)
+  const categories = params.getAll('category').filter(Boolean);
+  if (categories.length > 0) {
+    const placeholders = categories.map(() => '?').join(',');
+    query += ` AND category IN (${placeholders})`;
+    bindings.push(...categories);
   }
 
-  // Filter by language
-  const language = normalizeText(params.get('language'));
-  if (language && language !== 'all') {
-    query += ' AND (language = ? OR languages LIKE ?)';
-    bindings.push(language, `%"${language}"%`);
+  // Filter by languages (multi-select)
+  const languages = params.getAll('language').filter(Boolean);
+  if (languages.length > 0) {
+    const langConditions = languages.map(() => '(language = ? OR languages LIKE ?)').join(' OR ');
+    query += ` AND (${langConditions})`;
+    languages.forEach(lang => {
+      bindings.push(lang, `%"${lang}"%`);
+    });
   }
 
-  // Filter by tag
-  const tag = normalizeText(params.get('tag'));
-  if (tag && tag !== 'all') {
-    query += ' AND tags LIKE ?';
-    bindings.push(`%"${tag}"%`);
+  // Filter by tags (multi-select - match any)
+  const tags = params.getAll('tag').filter(Boolean);
+  if (tags.length > 0) {
+    const tagConditions = tags.map(() => 'tags LIKE ?').join(' OR ');
+    query += ` AND (${tagConditions})`;
+    tags.forEach(tag => {
+      bindings.push(`%"${tag}"%`);
+    });
   }
 
   // Full-text search
@@ -450,6 +459,9 @@ async function invalidateAllQueryCache(env) {
   // Note: KV doesn't support prefix delete, so we rely on TTL expiration
   // For immediate invalidation, we could track keys in a list, but TTL is simpler
   // Cache will auto-expire in 60 seconds anyway
+  
+  // Invalidate popular tags cache when notes are modified
+  await env.CACHE_KV.delete(CACHE_KEYS.POPULAR_TAGS);
 }
 
 // ============================================================================
@@ -518,8 +530,100 @@ async function syncD1FromGitHub(env, token) {
 
 async function handleNotesMeta(request, env, origin) {
   const url = new URL(request.url);
-  const result = await d1QueryMeta(env, url.searchParams);
+  const params = url.searchParams;
+  
+  // Track tag filter usage (for popular tags algorithm)
+  const tags = params.getAll('tag').filter(Boolean);
+  if (tags.length > 0) {
+    // Increment filter count for each tag (async, don't await)
+    tags.forEach(async (tag) => {
+      const filterKey = `${CACHE_KEYS.TAG_FILTER_PREFIX}${tag}`;
+      const count = parseInt(await env.CACHE_KV.get(filterKey) || '0', 10);
+      await env.CACHE_KV.put(filterKey, String(count + 1), {
+        expirationTtl: CACHE_TTL.TAG_FILTER,
+      });
+    });
+  }
+  
+  const result = await d1QueryMeta(env, params);
   return json(result, 200, origin, `public, max-age=${CACHE_TTL.D1_QUERY}`);
+}
+
+/**
+ * Popular Tags Algorithm - Multi-Factor Usage Scoring
+ * 
+ * Combines multiple signals from actual user behavior:
+ * 1. Recency: Tags from recently updated notes (time decay)
+ * 2. User filters: How often users filter/search by this tag (from /notes/meta requests)
+ * 3. Tag frequency: How many notes have this tag
+ * 
+ * Scoring formula:
+ *   score = (recency_weight × tag_count) + (filter_usage_boost)
+ * 
+ * Weights:
+ * - Recency: 7d=5×, 30d=3×, 90d=2×, older=1×
+ * - Filter usage: +15 per filter request in last 30 days
+ */
+async function handlePopularTags(request, env, origin) {
+  // Check cache first
+  const cached = await env.CACHE_KV.get(CACHE_KEYS.POPULAR_TAGS, 'json');
+  if (cached) {
+    return json({ tags: cached }, 200, origin, `public, max-age=${CACHE_TTL.POPULAR_TAGS}`);
+  }
+
+  // Query all notes with tags and updated_at
+  const query = 'SELECT tags, updated_at FROM notes_meta WHERE tags IS NOT NULL AND tags != "[]"';
+  const result = await env.DB.prepare(query).all();
+  
+  const now = Date.now();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const tagScores = new Map();
+  
+  // Factor 1: Recency-weighted tag frequency
+  result.results.forEach(row => {
+    const tags = JSON.parse(row.tags || '[]');
+    const updatedAt = row.updated_at || 0;
+    const ageInDays = (now - updatedAt) / DAY_MS;
+    
+    // Time decay weights
+    let recencyWeight = 1;
+    if (ageInDays <= 7) recencyWeight = 5;
+    else if (ageInDays <= 30) recencyWeight = 3;
+    else if (ageInDays <= 90) recencyWeight = 2;
+    
+    tags.forEach(tag => {
+      const baseScore = tagScores.get(tag) || 0;
+      tagScores.set(tag, baseScore + recencyWeight);
+    });
+  });
+  
+  // Factor 2: Filter usage boost (from actual user filter requests)
+  const filterBoostPromises = Array.from(tagScores.keys()).map(async tag => {
+    const filterKey = `${CACHE_KEYS.TAG_FILTER_PREFIX}${tag}`;
+    const filterCount = parseInt(await env.CACHE_KV.get(filterKey) || '0', 10);
+    return { tag, filterCount };
+  });
+  
+  const filterData = await Promise.all(filterBoostPromises);
+  filterData.forEach(({ tag, filterCount }) => {
+    const currentScore = tagScores.get(tag) || 0;
+    tagScores.set(tag, currentScore + (filterCount * 15)); // +15 per filter use
+  });
+  
+  // Sort by final score and take top 15
+  const popularTags = Array.from(tagScores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([tag]) => tag);
+  
+  // Cache the result
+  await env.CACHE_KV.put(
+    CACHE_KEYS.POPULAR_TAGS,
+    JSON.stringify(popularTags),
+    { expirationTtl: CACHE_TTL.POPULAR_TAGS }
+  );
+  
+  return json({ tags: popularTags }, 200, origin, `public, max-age=${CACHE_TTL.POPULAR_TAGS}`);
 }
 
 async function handleNotesSync(request, env, origin) {
@@ -671,7 +775,11 @@ export default {
   },
 
   async fetch(request, env) {
-    const origin = getAllowedOrigin(env);
+    // Get request origin and match against allowed origins
+    const requestOrigin = request.headers.get('Origin');
+    const allowedOrigins = getAllowedOrigins(env);
+    const origin = getMatchingOrigin(requestOrigin, allowedOrigins);
+    
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -711,6 +819,10 @@ export default {
 
       if (url.pathname === '/notes/meta' && request.method === 'GET') {
         return await handleNotesMeta(request, env, origin);
+      }
+
+      if (url.pathname === '/notes/tags/popular' && request.method === 'GET') {
+        return await handlePopularTags(request, env, origin);
       }
 
       // Specific routes BEFORE pattern matching

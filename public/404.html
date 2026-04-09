@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DevNotes</title>
+    <script>
+      // Single Page Apps for GitHub Pages
+      // https://github.com/rafgraph/spa-github-pages
+      // This script redirects 404 pages to the index.html with the path encoded as a query parameter
+      (function(l) {
+        if (l.search[1] === '/' ) {
+          var decoded = l.search.slice(1).split('&').map(function(s) { 
+            return s.replace(/~and~/g, '&')
+          }).join('?');
+          window.history.replaceState(null, null,
+              l.pathname.slice(0, -1) + decoded + l.hash
+          );
+        }
+      }(window.location))
+    </script>
+    <script>
+      // Store the path in sessionStorage to be redirected after loading
+      sessionStorage.setItem('redirect', location.href.split(location.origin)[1]);
+      location.replace('/DevNotes/');
+    </script>
+  </head>
+  <body>
+  </body>
+</html>

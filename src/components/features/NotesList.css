@@ -50,140 +50,17 @@
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
-.filters {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  padding: 1rem;
-  border-radius: 16px;
-  background: #151921;
-  border: 1px solid #2a3142;
-}
-
-.search-row {
-  display: flex;
-  gap: 0.85rem;
-  align-items: end;
-}
-
-.search-box {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.search-label,
-.filters-toolbar-label {
-  font-size: 0.78rem;
-  color: #9ea8b8;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.filters-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  padding-top: 0.1rem;
-}
-
-.filter-row {
-  display: flex;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  align-items: end;
-}
-
-.btn-clear-filters {
-  padding: 0.88rem 1rem;
-  border-radius: 10px;
-  border: 1px solid #485169;
-  background: #1c2230;
-  color: #d4d9e1;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.btn-clear-filters:hover {
-  border-color: #6c7898;
-  background: #202736;
-}
-
-.search-box input {
-  width: 100%;
-  padding: 0.95rem 1rem;
-  border-radius: 10px;
-  border: 1px solid #384055;
-  background: #1f2430;
-  color: #fff;
-  font-size: 1rem;
-  transition: border-color 0.3s, box-shadow 0.3s;
-}
-
-.search-box input:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.14);
-}
-
-.filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  min-width: 170px;
-}
-
-.filter-group label {
-  font-size: 0.82rem;
-  color: #b6bbc2;
-  font-weight: 600;
-}
-
-.filter-group select {
-  padding: 0.8rem 0.9rem;
-  border-radius: 10px;
-  border: 1px solid #384055;
-  background: #1f2430;
-  color: #fff;
-  font-size: 0.95rem;
-  cursor: pointer;
-  transition: border-color 0.3s;
-  min-width: 180px;
-}
-
-.filter-group select:focus {
-  outline: none;
-  border-color: #667eea;
-}
-
-.results-strip {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  align-items: center;
-  padding-top: 0.2rem;
-  flex-wrap: wrap;
-}
-
-.results-count {
-  color: #dfe5ee;
-  font-size: 0.94rem;
-  font-weight: 600;
-}
-
-.results-hint {
-  color: #99a3b3;
-  font-size: 0.88rem;
-}
-
+/* Notes grid */
 .notes-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.15rem;
+  transition: opacity 0.3s ease;
+}
+
+.notes-grid.loading {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 @media (max-width: 1200px) {
