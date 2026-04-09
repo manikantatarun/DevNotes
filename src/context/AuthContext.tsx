@@ -1,6 +1,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { GITHUB_CONFIG } from '../config';
+import {
+  GITHUB_CONFIG,
+  GITHUB_API,
+  STORAGE_KEYS,
+  API_ENDPOINTS,
+  getCollaboratorPermissionUrl,
+  getOAuthAuthorizeUrl,
+  getWorkerUrl,
+  hasWritePermission,
+} from '../config';
 import { GitHubStorageService } from '../services/storage/GitHubStorageService';
 import type { IStorageService } from '../services/storage/IStorageService';
 import { AuthContext } from './auth-context';
@@ -29,27 +38,25 @@ export interface AuthContextValue extends AuthState {
 
 // ── Storage helpers ───────────────────────────────────────────────────────────
 
-const SESSION_TOKEN_KEY = 'devnotes_gh_token';
-
 function saveToken(token: string) {
-  sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+  sessionStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, token);
 }
 
 function loadToken(): string | null {
-  return sessionStorage.getItem(SESSION_TOKEN_KEY);
+  return sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN);
 }
 
 function clearToken() {
-  sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  sessionStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
 }
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 
 async function fetchGitHubUser(token: string): Promise<GitHubUser> {
-  const res = await fetch('https://api.github.com/user', {
+  const res = await fetch(GITHUB_API.USER_ENDPOINT, {
     headers: {
       Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
+      Accept: GITHUB_API.ACCEPT_HEADER,
     },
   });
   if (!res.ok) throw new Error('Failed to fetch GitHub user');
@@ -57,20 +64,16 @@ async function fetchGitHubUser(token: string): Promise<GitHubUser> {
 }
 
 async function checkWriteAccess(token: string, user: GitHubUser): Promise<boolean> {
-  const { dataRepoOwner, dataRepoName } = GITHUB_CONFIG;
-  const res = await fetch(
-    `https://api.github.com/repos/${dataRepoOwner}/${dataRepoName}/collaborators/${user.login}/permission`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-      },
-    }
-  );
+  const res = await fetch(getCollaboratorPermissionUrl(user.login), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: GITHUB_API.ACCEPT_HEADER,
+    },
+  });
   if (res.status === 403 || res.status === 404) return false;
   const data = await res.json();
   const permission: string = data.role_name ?? data.permission ?? '';
-  return ['admin', 'maintain', 'write'].includes(permission);
+  return hasWritePermission(permission);
 }
 
 function buildStorageService(token?: string): IStorageService {
@@ -79,7 +82,7 @@ function buildStorageService(token?: string): IStorageService {
     repo: GITHUB_CONFIG.dataRepoName,
     branch: GITHUB_CONFIG.dataRepoBranch,
     token,
-    workerUrl: GITHUB_CONFIG.oauthWorkerUrl,
+    workerUrl: GITHUB_CONFIG.workerUrl,
   });
 }
 
@@ -97,9 +100,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── resolve a token → full auth state ──
 
   const resolveToken = useCallback(async (token: string) => {
+    console.log('[Auth] Resolving token...');
     try {
       const user = await fetchGitHubUser(token);
+      console.log('[Auth] User fetched:', user.login);
       const hasWriteAccess = await checkWriteAccess(token, user);
+      console.log('[Auth] Write access:', hasWriteAccess);
       setState({
         user,
         token,
@@ -107,7 +113,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading: false,
         storageService: buildStorageService(token),
       });
-    } catch {
+      console.log('[Auth] Auth state updated successfully');
+    } catch (err) {
+      console.error('[Auth] Failed to resolve token:', err);
       clearToken();
       setState({
         user: null,
@@ -125,27 +133,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const state = urlParams.get('state');
-    const savedState = sessionStorage.getItem('oauth_state');
+    const savedState = sessionStorage.getItem(STORAGE_KEYS.OAUTH_STATE);
 
     if (code && state && state === savedState) {
       // Clean URL first
-      sessionStorage.removeItem('oauth_state');
+      sessionStorage.removeItem(STORAGE_KEYS.OAUTH_STATE);
       const clean = window.location.pathname;
       window.history.replaceState({}, '', clean);
 
+      console.log('[Auth] Exchanging OAuth code for token...');
       // Exchange code for token via Cloudflare Worker
-      fetch(`${GITHUB_CONFIG.oauthWorkerUrl}/oauth/token`, {
+      fetch(getWorkerUrl(API_ENDPOINTS.OAUTH_TOKEN), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
       })
-        .then((res) => res.json())
+        .then((res) => {
+          console.log('[Auth] Token exchange response status:', res.status);
+          return res.json();
+        })
         .then(async (data: { access_token?: string; error?: string }) => {
+          console.log('[Auth] Token exchange data:', data);
           if (!data.access_token) throw new Error(data.error ?? 'No token returned');
           saveToken(data.access_token);
+          console.log('[Auth] Token saved, resolving user...');
           await resolveToken(data.access_token);
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('[Auth] Token exchange failed:', err);
           setState((prev) => ({ ...prev, loading: false }));
         });
       return;
@@ -154,10 +169,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check session storage for existing token
     const existingToken = loadToken();
     if (existingToken) {
+      console.log('[Auth] Found existing token in session storage');
       setTimeout(() => {
         void resolveToken(existingToken);
       }, 0);
     } else {
+      console.log('[Auth] No existing token found');
       setTimeout(() => {
         setState((prev) => ({ ...prev, loading: false }));
       }, 0);
@@ -168,14 +185,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(() => {
     const oauthState = crypto.randomUUID();
-    sessionStorage.setItem('oauth_state', oauthState);
-    const redirect = encodeURIComponent(GITHUB_CONFIG.appBaseUrl);
-    window.location.href =
-      `https://github.com/login/oauth/authorize` +
-      `?client_id=${GITHUB_CONFIG.clientId}` +
-      `&redirect_uri=${redirect}` +
-      `&scope=public_repo` +
-      `&state=${oauthState}`;
+    sessionStorage.setItem(STORAGE_KEYS.OAUTH_STATE, oauthState);
+    window.location.href = getOAuthAuthorizeUrl(oauthState);
   }, []);
 
   const logout = useCallback(() => {

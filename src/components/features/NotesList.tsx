@@ -6,7 +6,7 @@ import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
 import type { Note, NoteType, Category } from '../../types';
 import { NOTE_TYPES, CATEGORIES } from '../../constants';
-import { GITHUB_CONFIG } from '../../config';
+import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
 import './NotesList.css';
 
 interface WorkerMetaRow {
@@ -51,7 +51,7 @@ export function NotesList() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
 
-  const isWorkerConfigured = Boolean(GITHUB_CONFIG.oauthWorkerUrl);
+  const workerConfigured = isWorkerConfigured();
 
   // Derive the set of languages across all notes (for the language dropdown)
   const availableLanguages = useMemo(() => {
@@ -146,7 +146,7 @@ export function NotesList() {
     filterType !== 'all' ||
     filterCategory !== 'all' ||
     filterLanguage !== 'all';
-  const isRemoteMode = isFiltered && isWorkerConfigured && !remoteError;
+  const isRemoteMode = isFiltered && workerConfigured && !remoteError;
 
   function mapWorkerRowToNote(row: WorkerMetaRow): Note {
     const metaLanguages = row.languages ?? [];
@@ -183,7 +183,7 @@ export function NotesList() {
   }, [refresh]);
 
   useEffect(() => {
-    if (!isFiltered || !isWorkerConfigured) {
+    if (!isFiltered || !workerConfigured) {
       setRemoteNotes(null);
       setRemoteTotal(null);
       setRemoteTotalPages(1);
@@ -206,7 +206,7 @@ export function NotesList() {
         params.set('page', String(remotePage));
         params.set('pageSize', String(remotePageSize));
 
-        const res = await fetch(`${GITHUB_CONFIG.oauthWorkerUrl}/notes/meta?${params.toString()}`, {
+        const res = await fetch(`${getWorkerUrl(API_ENDPOINTS.NOTES_META)}?${params.toString()}`, {
           signal: controller.signal,
         });
 
@@ -238,7 +238,7 @@ export function NotesList() {
     };
   }, [
     isFiltered,
-    isWorkerConfigured,
+    workerConfigured,
     searchTerm,
     filterType,
     filterCategory,
