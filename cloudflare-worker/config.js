@@ -58,58 +58,12 @@ export function getRepoConfig(env) {
 }
 
 /**
- * Get allowed CORS origins from environment
+ * Get allowed CORS origin from environment
  * @param {Object} env - Worker environment bindings
- * @returns {string[]} Array of allowed origins
- */
-export function getAllowedOrigins(env) {
-  // Support comma-separated list of origins
-  const originsString = env.ALLOWED_ORIGINS || env.ALLOWED_ORIGIN || '';
-  
-  if (!originsString || originsString === '*') {
-    return ['*'];
-  }
-  
-  return originsString
-    .split(',')
-    .map(origin => origin.trim())
-    .filter(Boolean);
-}
-
-/**
- * Match request origin against allowed origins
- * @param {string} requestOrigin - Origin from request header
- * @param {string[]} allowedOrigins - Array of allowed origins
- * @returns {string} Matched origin or '*'
- */
-export function getMatchingOrigin(requestOrigin, allowedOrigins) {
-  // If wildcard is allowed, return the request origin (or wildcard if no request origin)
-  if (allowedOrigins.includes('*')) {
-    return requestOrigin || '*';
-  }
-  
-  // If no request origin, return first allowed origin as fallback
-  if (!requestOrigin) {
-    return allowedOrigins[0] || '*';
-  }
-  
-  // Check if request origin is in allowed list
-  if (allowedOrigins.includes(requestOrigin)) {
-    return requestOrigin;
-  }
-  
-  // No match found - deny by returning null (caller should handle)
-  // Or return first allowed origin as fallback for development
-  return allowedOrigins[0] || '*';
-}
-
-/**
- * Legacy function for backward compatibility
- * @deprecated Use getAllowedOrigins instead
+ * @returns {string} Allowed origin
  */
 export function getAllowedOrigin(env) {
-  const origins = getAllowedOrigins(env);
-  return origins[0] || '*';
+  return env.ALLOWED_ORIGIN || '*';
 }
 
 /**

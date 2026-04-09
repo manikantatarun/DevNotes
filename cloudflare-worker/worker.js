@@ -25,8 +25,7 @@ import {
   GITHUB,
   WRITE_PERMISSIONS,
   getRepoConfig,
-  getAllowedOrigins,
-  getMatchingOrigin,
+  getAllowedOrigin,
   getOAuthConfig,
   getCDNUrl,
 } from './config.js';
@@ -775,11 +774,7 @@ export default {
   },
 
   async fetch(request, env) {
-    // Get request origin and match against allowed origins
-    const requestOrigin = request.headers.get('Origin');
-    const allowedOrigins = getAllowedOrigins(env);
-    const origin = getMatchingOrigin(requestOrigin, allowedOrigins);
-    
+    const origin = getAllowedOrigin(env);
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
