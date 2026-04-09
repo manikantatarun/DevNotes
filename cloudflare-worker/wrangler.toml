@@ -2,25 +2,40 @@ name = "devnotes"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
-# Set these secrets via:  npx wrangler secret put GITHUB_CLIENT_SECRET
-# or in the Cloudflare dashboard under Workers → your worker → Settings → Variables
+# Build configuration for ES modules
+[build]
+command = ""
 
+# Environment variables
 [vars]
-GITHUB_CLIENT_ID = "Ov23liGfeE9zIi8ekes4"
 ALLOWED_ORIGIN   = "https://manikantatarun.github.io"
 DATA_REPO_OWNER  = "manikantatarun"
 DATA_REPO_NAME   = "devnotes-data"
 DATA_REPO_BRANCH = "main"
-# GITHUB_CLIENT_SECRET must be added as a secret (not a plain var):
-# npx wrangler secret put GITHUB_CLIENT_SECRET
+GITHUB_CLIENT_ID = "Iv23lim4G6FNdDuTf6o6"  # OAuth App ID for user login
 
+# GitHub App Configuration (set as secrets via wrangler secret put)
+# Required secrets:
+#   GITHUB_APP_ID - Your GitHub App ID
+#   GITHUB_APP_PRIVATE_KEY - Your GitHub App private key (PEM format)
+#   GITHUB_APP_INSTALLATION_ID - Installation ID for your repo
+#   GITHUB_CLIENT_SECRET - OAuth App secret for user login
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "devnotes-db"
+database_id = "8bf310ac-df69-489e-87a0-a8841c91869d"
+
+# KV namespace for caching (CDN responses and GitHub App tokens)
 [[kv_namespaces]]
-binding = "META_KV"
+binding = "CACHE_KV"
 id = "231ac68fcc8945b3b2a792be840c7cc5"
 preview_id = "79255b16a1234e7b85d1843aa22f1eb0"
 
+# Scheduled sync every hour
 [triggers]
-crons = ["*/1 * * * *"]  # Every 5 minute
+crons = ["0 * * * *"]
 
 [observability]
 [observability.logs]

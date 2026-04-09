@@ -1,5 +1,5 @@
 import { useAuth } from '../../context/useAuth';
-import { GITHUB_CONFIG } from '../../config';
+import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
 import { useState } from 'react';
 import './AuthButton.css';
 
@@ -9,13 +9,13 @@ export function AuthButton() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const handleSync = async () => {
-    if (!token || !GITHUB_CONFIG.oauthWorkerUrl || syncing) return;
+    if (!token || !isWorkerConfigured() || syncing) return;
 
     try {
       setSyncing(true);
       setSyncMsg(null);
 
-      const res = await fetch(`${GITHUB_CONFIG.oauthWorkerUrl}/notes/sync`, {
+      const res = await fetch(getWorkerUrl(API_ENDPOINTS.NOTES_SYNC), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

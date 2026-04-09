@@ -1,18 +1,37 @@
 /**
- * Cloudflare Worker – GitHub OAuth + KV-backed metadata search + note CRUD
+ * Cloudflare Worker – GitHub App + D1 metadata + KV cache + CDN content
+ *
+ * Architecture:
+ * - D1: Metadata storage with full-text search
+ * - KV: Cache for CDN responses and GitHub App tokens
+ * - GitHub App: Authentication for write operations
+ * - jsDelivr CDN: Reading note content (cached in KV)
  *
  * Endpoints:
- *   POST /oauth/token
- *   GET  /notes/meta
- *   POST /notes/sync
- *   POST /notes/create
- *   POST /notes/update
- *   POST /notes/delete
+ *   GET  /notes/meta         - Query metadata from D1
+ *   GET  /notes/:id          - Get note content from CDN (cached)
+ *   POST /notes/sync         - Sync metadata from GitHub to D1
+ *   POST /notes/create       - Create new note
+ *   POST /notes/update       - Update existing note
+ *   POST /notes/delete       - Delete note
  */
+
+import { getGitHubAppToken } from './github-app-auth.js';
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+  PAGINATION,
+  GITHUB,
+  WRITE_PERMISSIONS,
+  getRepoConfig,
+  getAllowedOrigin,
+  getOAuthConfig,
+  getCDNUrl,
+} from './config.js';
 
 const CORS = (origin) => ({
   'Access-Control-Allow-Origin': origin,
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-GitHub-Token',
   'Access-Control-Max-Age': '86400',
 });
@@ -26,14 +45,6 @@ const json = (body, status = 200, origin = '*', cacheControl = 'no-store') =>
       ...CORS(origin),
     },
   });
-
-function getRepoConfig(env) {
-  return {
-    owner: env.DATA_REPO_OWNER || 'manikantatarun',
-    repo: env.DATA_REPO_NAME || 'devnotes-data',
-    branch: env.DATA_REPO_BRANCH || 'main',
-  };
-}
 
 function normalizeText(value) {
   return String(value || '').toLowerCase().trim();
@@ -73,8 +84,8 @@ function noteToMeta(note) {
 function githubHeaders(token) {
   const headers = {
     Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'devnotes-worker',
+    'X-GitHub-Api-Version': GITHUB.API_VERSION,
+    'User-Agent': GITHUB.USER_AGENT,
   };
   if (token) {
     headers.Authorization = `token ${token.trim()}`;
@@ -84,12 +95,12 @@ function githubHeaders(token) {
 
 function repoContentUrl(env, path) {
   const { owner, repo, branch } = getRepoConfig(env);
-  return `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
+  return `${GITHUB.API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
 }
 
 function repoContentWriteUrl(env, path) {
   const { owner, repo } = getRepoConfig(env);
-  return `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  return `${GITHUB.API_BASE}/repos/${owner}/${repo}/contents/${path}`;
 }
 
 function encodeBase64Json(data) {
@@ -98,73 +109,6 @@ function encodeBase64Json(data) {
 
 function decodeBase64Json(content) {
   return JSON.parse(decodeURIComponent(escape(atob(content.replace(/\n/g, '')))));
-}
-
-function parseAuthToken(request) {
-  const auth = request.headers.get('Authorization') || '';
-  const match = auth.match(/^(Bearer|token)\s+(.+)$/i);
-  if (match?.[2]) return match[2].trim();
-
-  const alt = request.headers.get('X-GitHub-Token') || request.headers.get('x-github-token');
-  if (alt) return alt.trim();
-
-  return null;
-}
-
-async function githubGetUser(token) {
-  const res = await fetch('https://api.github.com/user', {
-    headers: githubHeaders(token),
-  });
-
-  if (res.ok) {
-    return res.json();
-  }
-
-  // Fallback for environments expecting Bearer token format
-  if (res.status === 401) {
-    const retry = await fetch('https://api.github.com/user', {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (retry.ok) return retry.json();
-  }
-
-  return null;
-}
-
-async function checkWriteAccess(token, env, userLogin) {
-  const { owner, repo } = getRepoConfig(env);
-  const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/collaborators/${userLogin}/permission`,
-    { headers: githubHeaders(token) },
-  );
-  if (res.status === 403 || res.status === 404) return false;
-  if (!res.ok) return false;
-  const data = await res.json();
-  const permission = data.role_name ?? data.permission ?? '';
-  return ['admin', 'maintain', 'write'].includes(permission);
-}
-
-async function assertWriteAuthorized(request, env, origin) {
-  const token = parseAuthToken(request);
-  if (!token) {
-    return { ok: false, response: json({ error: 'Missing Authorization token' }, 401, origin) };
-  }
-
-  const user = await githubGetUser(token);
-  if (!user?.login) {
-    return { ok: false, response: json({ error: 'Invalid GitHub token' }, 401, origin) };
-  }
-
-  const allowed = await checkWriteAccess(token, env, user.login);
-  if (!allowed) {
-    return { ok: false, response: json({ error: 'No write access to data repo' }, 403, origin) };
-  }
-
-  return { ok: true, token };
 }
 
 async function githubGetFile(path, env, token) {
@@ -225,93 +169,207 @@ async function githubDeleteFile(path, env, token, sha, message) {
   }
 }
 
-function kvNoteKey(id) {
-  return `note:${id}`;
+// ============================================================================
+// D1 Database Functions
+// ============================================================================
+
+async function d1InsertMeta(env, meta) {
+  const stmt = env.DB.prepare(`
+    INSERT OR REPLACE INTO notes_meta
+    (id, type, category, title, language, tags, languages, preview, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  await stmt.bind(
+    meta.id,
+    meta.type,
+    meta.category,
+    meta.title,
+    meta.language || '',
+    JSON.stringify(meta.tags || []),
+    JSON.stringify(meta.languages || []),
+    meta.preview || '',
+    meta.createdAt || Date.now(),
+    meta.updatedAt || Date.now()
+  ).run();
 }
 
-function kvIndexKey(kind, value) {
-  return `idx:${kind}:${normalizeText(value)}`;
+async function d1DeleteMeta(env, id) {
+  await env.DB.prepare('DELETE FROM notes_meta WHERE id = ?').bind(id).run();
 }
 
-const KV_ALL_IDS = 'idx:all';
-const KV_BOOTSTRAPPED = 'sys:bootstrapped';
-const KV_SYNC_TIMESTAMP = 'sys:sync-timestamp';
-
-async function kvGetIdSet(env, key) {
-  const raw = await env.META_KV.get(key, 'json');
-  if (!Array.isArray(raw)) return [];
-  return uniq(raw.map((id) => String(id)));
+async function d1GetMeta(env, id) {
+  const result = await env.DB.prepare('SELECT * FROM notes_meta WHERE id = ?').bind(id).first();
+  if (!result) return null;
+  return rowToMeta(result);
 }
 
-async function kvPutIdSet(env, key, ids) {
-  await env.META_KV.put(key, JSON.stringify(uniq(ids)));
-}
+async function d1QueryMeta(env, params) {
+  let query = 'SELECT * FROM notes_meta WHERE 1=1';
+  const bindings = [];
 
-async function kvAddId(env, key, id) {
-  const ids = await kvGetIdSet(env, key);
-  if (!ids.includes(id)) {
-    ids.push(id);
-    await kvPutIdSet(env, key, ids);
-  }
-}
-
-async function kvRemoveId(env, key, id) {
-  const ids = await kvGetIdSet(env, key);
-  const filtered = ids.filter((x) => x !== id);
-  await kvPutIdSet(env, key, filtered);
-}
-
-async function kvGetMeta(env, id) {
-  return env.META_KV.get(kvNoteKey(id), 'json');
-}
-
-async function kvPutMeta(env, meta) {
-  await env.META_KV.put(kvNoteKey(meta.id), JSON.stringify(meta));
-}
-
-function metaIndexKeys(meta) {
-  const keys = [
-    kvIndexKey('type', meta.type),
-    kvIndexKey('category', meta.category),
-  ];
-
-  const languages = uniq([meta.language, ...(meta.languages || [])].map(normalizeText));
-  for (const lang of languages) {
-    keys.push(kvIndexKey('language', lang));
+  // Filter by type
+  const type = normalizeText(params.get('type'));
+  if (type && type !== 'all') {
+    query += ' AND type = ?';
+    bindings.push(type);
   }
 
-  for (const tag of uniq((meta.tags || []).map(normalizeText))) {
-    keys.push(kvIndexKey('tag', tag));
+  // Filter by category
+  const category = normalizeText(params.get('category'));
+  if (category && category !== 'all') {
+    query += ' AND category = ?';
+    bindings.push(category);
   }
 
-  return keys;
+  // Filter by language
+  const language = normalizeText(params.get('language'));
+  if (language && language !== 'all') {
+    query += ' AND (language = ? OR languages LIKE ?)';
+    bindings.push(language, `%"${language}"%`);
+  }
+
+  // Filter by tag
+  const tag = normalizeText(params.get('tag'));
+  if (tag && tag !== 'all') {
+    query += ' AND tags LIKE ?';
+    bindings.push(`%"${tag}"%`);
+  }
+
+  // Full-text search
+  const q = params.get('q');
+  if (q && q.trim()) {
+    // Use FTS if available
+    const ftsQuery = `
+      SELECT notes_meta.* FROM notes_meta
+      JOIN notes_fts ON notes_meta.rowid = notes_fts.rowid
+      WHERE notes_fts MATCH ?
+    `;
+    const ftsBindings = [q.trim()];
+    
+    // If we have filters, we need to apply them too
+    if (bindings.length > 0) {
+      query += ' AND id IN (' + ftsQuery.replace('SELECT notes_meta.*', 'SELECT notes_meta.id') + ')';
+      bindings.push(...ftsBindings);
+    } else {
+      query = ftsQuery;
+      bindings.push(...ftsBindings);
+    }
+  }
+
+  // Order by updated_at descending
+  query += ' ORDER BY updated_at DESC';
+
+  // Pagination
+  const page = Math.max(PAGINATION.DEFAULT_PAGE, Number(params.get('page') || PAGINATION.DEFAULT_PAGE));
+  const pageSize = Math.min(
+    PAGINATION.MAX_PAGE_SIZE,
+    Math.max(1, Number(params.get('pageSize') || PAGINATION.DEFAULT_PAGE_SIZE))
+  );
+  const offset = (page - 1) * pageSize;
+
+  query += ' LIMIT ? OFFSET ?';
+  bindings.push(pageSize, offset);
+
+  const stmt = env.DB.prepare(query);
+  const result = await stmt.bind(...bindings).all();
+
+  // Get total count for pagination
+  let countQuery = 'SELECT COUNT(*) as count FROM notes_meta WHERE 1=1';
+  const countBindings = bindings.slice(0, bindings.length - 2); // Remove LIMIT and OFFSET
+
+  if (type && type !== 'all') {
+    countQuery += ' AND type = ?';
+  }
+  if (category && category !== 'all') {
+    countQuery += ' AND category = ?';
+  }
+  if (language && language !== 'all') {
+    countQuery += ' AND (language = ? OR languages LIKE ?)';
+  }
+  if (tag && tag !== 'all') {
+    countQuery += ' AND tags LIKE ?';
+  }
+  if (q && q.trim()) {
+    countQuery += ' AND id IN (SELECT notes_meta.id FROM notes_meta JOIN notes_fts ON notes_meta.rowid = notes_fts.rowid WHERE notes_fts MATCH ?)';
+  }
+
+  const countStmt = env.DB.prepare(countQuery);
+  const countResult = countBindings.length > 0 
+    ? await countStmt.bind(...countBindings).first()
+    : await countStmt.first();
+
+  const total = countResult?.count || 0;
+
+  return {
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    rows: result.results.map(rowToMeta),
+  };
 }
 
-async function kvAttachMetaToIndexes(env, meta) {
-  await kvPutMeta(env, meta);
-  await kvAddId(env, KV_ALL_IDS, meta.id);
-  const keys = metaIndexKeys(meta);
-  await Promise.all(keys.map((key) => kvAddId(env, key, meta.id)));
+function rowToMeta(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    category: row.category,
+    title: row.title,
+    language: row.language || '',
+    languages: JSON.parse(row.languages || '[]'),
+    tags: JSON.parse(row.tags || '[]'),
+    preview: row.preview || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-async function kvDetachMetaFromIndexes(env, meta) {
-  await env.META_KV.delete(kvNoteKey(meta.id));
-  await kvRemoveId(env, KV_ALL_IDS, meta.id);
-  const keys = metaIndexKeys(meta);
-  await Promise.all(keys.map((key) => kvRemoveId(env, key, meta.id)));
+// ============================================================================
+// CDN + KV Cache Functions
+// ============================================================================
+
+async function getCDNNoteContent(env, id) {
+  const cacheKey = `${CACHE_KEYS.CDN_NOTE_PREFIX}${id}`;
+  
+  // Try cache first
+  const cached = await env.CACHE_KV.get(cacheKey, 'json');
+  if (cached) {
+    return cached;
+  }
+
+  // Fetch from CDN
+  const { owner, repo, branch } = getRepoConfig(env);
+  const cdnUrl = getCDNUrl(owner, repo, branch, `notes/${id}.json`);
+  
+  const response = await fetch(cdnUrl);
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(`CDN fetch failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  
+  // Cache with TTL
+  await env.CACHE_KV.put(cacheKey, JSON.stringify(data), {
+    expirationTtl: CACHE_TTL.CDN_CONTENT,
+  });
+
+  return data;
 }
 
-function intersectIdSets(sets) {
-  if (sets.length === 0) return [];
-  const [first, ...rest] = sets;
-  return first.filter((id) => rest.every((set) => set.includes(id)));
+async function invalidateCDNCache(env, id) {
+  await env.CACHE_KV.delete(`${CACHE_KEYS.CDN_NOTE_PREFIX}${id}`);
 }
 
-// Fetch meta index via GitHub Tree API (always fresh, requires token)
+// ============================================================================
+// Sync Functions
+// ============================================================================
+
 async function fetchMetaIndexViaGitHubAPI(env, token) {
   const { owner, repo, branch } = getRepoConfig(env);
   const treeRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    `${GITHUB.API_BASE}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
     { headers: githubHeaders(token) },
   );
   if (!treeRes.ok) throw new Error(`GitHub tree API error ${treeRes.status}`);
@@ -341,206 +399,59 @@ async function fetchMetaIndexViaGitHubAPI(env, token) {
     }
   }
 
-  allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   return allMeta;
 }
 
-// Fetch meta index via jsDelivr CDN (no auth needed, may be stale — only for bootstrap)
-async function fetchMetaIndexFromCDN(env) {
-  const { owner, repo, branch } = getRepoConfig(env);
-
-  const version = env.GIT_COMMIT_SHA || Date.now();
-
-  // ✅ STEP 1: Get file list from GitHub
-  const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-
-  const treeRes = await fetch(treeUrl, {
-    headers: env.GITHUB_TOKEN
-      ? { Authorization: `Bearer ${env.GITHUB_TOKEN}` }
-      : {},
-  });
-
-  if (!treeRes.ok) {
-    throw new Error(`GitHub tree fetch failed (${treeRes.status})`);
-  }
-
-  const treeData = await treeRes.json();
-  const files = Array.isArray(treeData.tree) ? treeData.tree : [];
-
-  const metaPaths = files
-    .map((file) => file.path)
-    .filter(
-      (path) =>
-        typeof path === "string" &&
-        path.startsWith("meta/") &&
-        path.endsWith(".json")
-    );
-
-  console.log(`[DEBUG] Meta paths:`, metaPaths);
-
-  // ✅ STEP 2: Setup CDN + RAW fallback
-  const baseCdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}`;
-  const baseRaw = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
-
-  const chunkSize = 5;
-  const allMeta = [];
-
-  for (let i = 0; i < metaPaths.length; i += chunkSize) {
-    const chunk = metaPaths.slice(i, i + chunkSize);
-
-    const rows = await Promise.all(
-      chunk.map(async (path) => {
-        const cdnUrl = `${baseCdn}/${path}?v=${version}`;
-        const rawUrl = `${baseRaw}/${path}`;
-
-        try {
-          console.log(`[DEBUG] Trying CDN: ${cdnUrl}`);
-
-          let res = await fetch(cdnUrl);
-
-          // 🔥 Fallback if CDN fails
-          if (!res.ok) {
-            console.warn(`[DEBUG] CDN failed (${res.status}), fallback to RAW`);
-
-            res = await fetch(rawUrl);
-          }
-
-          if (!res.ok) {
-            console.warn(`[DEBUG] RAW also failed (${res.status})`);
-            return null;
-          }
-
-          const data = await res.json();
-
-          console.log(`[DEBUG] Data from ${path}:`, data);
-
-          return data;
-        } catch (err) {
-          console.error(`[DEBUG] Error fetching ${path}:`, err);
-          return null;
-        }
-      })
-    );
-
-    for (const row of rows) {
-      if (row && typeof row === "object") {
-        allMeta.push(row);
-      }
-    }
-  }
-
-  allMeta.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-  console.log(`[DEBUG] Final metadata count: ${allMeta.length}`);
-
-  return allMeta;
-}
-
-async function kvDeleteByPrefix(env, prefix) {
-  let cursor = undefined;
-  do {
-    const listed = await env.META_KV.list({ prefix, cursor, limit: 1000 });
-    await Promise.all(listed.keys.map((k) => env.META_KV.delete(k.name)));
-    cursor = listed.list_complete ? undefined : listed.cursor;
-  } while (cursor);
-}
-
-async function rebuildKvFromMetas(env, metas) {
-  await kvDeleteByPrefix(env, 'note:');
-  await kvDeleteByPrefix(env, 'idx:');
-
+async function syncD1FromGitHub(env, token) {
+  const metas = await fetchMetaIndexViaGitHubAPI(env, token);
+  
+  // Clear existing data
+  await env.DB.prepare('DELETE FROM notes_meta').run();
+  
+  // Insert all metadata
   for (const meta of metas) {
-    await kvAttachMetaToIndexes(env, meta);
+    await d1InsertMeta(env, meta);
   }
 
-  await env.META_KV.put(KV_BOOTSTRAPPED, '1');
+  // Update sync timestamp
+  await env.DB.prepare(`
+    INSERT OR REPLACE INTO sync_state (key, value, updated_at)
+    VALUES ('last_sync', ?, ?)
+  `).bind(String(Date.now()), Date.now()).run();
+
+  return metas.length;
 }
 
-async function ensureKvBootstrapped(env) {
-  const marked = await env.META_KV.get(KV_BOOTSTRAPPED);
-  if (marked) return; // Already bootstrapped
-
-  // Bootstrap from CDN (no auth needed; acceptable for first-time setup)
-  const allMeta = await fetchMetaIndexFromCDN(env);
-  await rebuildKvFromMetas(env, allMeta);
-  await env.META_KV.put(KV_SYNC_TIMESTAMP, String(Date.now()));
-}
-
-function applySearchFilter(data, query) {
-  const q = normalizeText(query);
-  if (!q) return data;
-  const words = q.split(/\s+/).filter(Boolean);
-
-  return data.filter((note) => {
-    const haystack = [
-      note.title,
-      note.preview,
-      ...(note.tags || []),
-      note.category,
-      note.type,
-      note.language,
-      ...(note.languages || []),
-    ]
-      .map((part) => normalizeText(part))
-      .join(' ');
-
-    return words.every((word) => haystack.includes(word));
-  });
-}
-
-function paginate(items, params) {
-  const page = Math.max(1, Number(params.get('page') || 1));
-  const pageSize = Math.min(100, Math.max(1, Number(params.get('pageSize') || 50)));
-  const start = (page - 1) * pageSize;
-  return {
-    page,
-    pageSize,
-    total: items.length,
-    totalPages: Math.max(1, Math.ceil(items.length / pageSize)),
-    rows: items.slice(start, start + pageSize),
-  };
-}
-
-function buildIndexKeysFromQuery(params) {
-  const keys = [];
-  const type = normalizeText(params.get('type'));
-  const category = normalizeText(params.get('category'));
-  const language = normalizeText(params.get('language'));
-  const tag = normalizeText(params.get('tag'));
-
-  if (type && type !== 'all') keys.push(kvIndexKey('type', type));
-  if (category && category !== 'all') keys.push(kvIndexKey('category', category));
-  if (language && language !== 'all') keys.push(kvIndexKey('language', language));
-  if (tag && tag !== 'all') keys.push(kvIndexKey('tag', tag));
-
-  return keys;
-}
+// ============================================================================
+// Request Handlers
+// ============================================================================
 
 async function handleNotesMeta(request, env, origin) {
-  await ensureKvBootstrapped(env);
   const url = new URL(request.url);
-
-  const indexKeys = buildIndexKeysFromQuery(url.searchParams);
-  const candidateSets = await Promise.all(indexKeys.map((key) => kvGetIdSet(env, key)));
-  const candidateIds = indexKeys.length > 0
-    ? intersectIdSets(candidateSets)
-    : await kvGetIdSet(env, KV_ALL_IDS);
-
-  const metas = await Promise.all(candidateIds.map((id) => kvGetMeta(env, id)));
-  let rows = metas.filter(Boolean);
-
-  rows = applySearchFilter(rows, url.searchParams.get('q'));
-  rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-  return json(paginate(rows, url.searchParams), 200, origin, 'public, max-age=20');
+  const result = await d1QueryMeta(env, url.searchParams);
+  return json(result, 200, origin, `public, max-age=${CACHE_TTL.D1_QUERY}`);
 }
 
-async function handleNotesSync(env, origin, token) {
-  // Use GitHub API directly (requires token) so we always get fresh data, not stale CDN
-  const metas = await fetchMetaIndexViaGitHubAPI(env, token);
-  await rebuildKvFromMetas(env, metas);
-  await env.META_KV.put(KV_SYNC_TIMESTAMP, String(Date.now()));
-  return json({ ok: true, count: metas.length }, 200, origin);
+async function handleNoteGet(request, env, origin, id) {
+  try {
+    const content = await getCDNNoteContent(env, id);
+    if (!content) {
+      return json({ error: 'Note not found' }, 404, origin);
+    }
+    return json(content, 200, origin, `public, max-age=${CACHE_TTL.CDN_CONTENT}`);
+  } catch (error) {
+    return json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch note' },
+      500,
+      origin
+    );
+  }
+}
+
+async function handleNotesSync(env, origin) {
+  const token = await getGitHubAppToken(env);
+  const count = await syncD1FromGitHub(env, token);
+  return json({ ok: true, count }, 200, origin);
 }
 
 function nowMs() {
@@ -559,7 +470,7 @@ async function parseJsonBody(request, origin) {
   }
 }
 
-async function handleCreate(request, env, origin, token) {
+async function handleCreate(request, env, origin) {
   const parsed = await parseJsonBody(request, origin);
   if (!parsed.ok) return parsed.response;
 
@@ -568,6 +479,7 @@ async function handleCreate(request, env, origin, token) {
     return json({ error: 'Missing note payload' }, 400, origin);
   }
 
+  const token = await getGitHubAppToken(env);
   const id = generateId();
   const ts = nowMs();
   const note = { ...incoming, id, createdAt: ts, updatedAt: ts };
@@ -575,12 +487,12 @@ async function handleCreate(request, env, origin, token) {
 
   await githubPutFile(`notes/${id}.json`, note, env, token, `add note: ${note.title}`);
   await githubPutFile(`meta/${id}.json`, meta, env, token, `add meta: ${note.title}`);
-  await kvAttachMetaToIndexes(env, meta);
+  await d1InsertMeta(env, meta);
 
   return json({ note }, 200, origin);
 }
 
-async function handleUpdate(request, env, origin, token) {
+async function handleUpdate(request, env, origin) {
   const parsed = await parseJsonBody(request, origin);
   if (!parsed.ok) return parsed.response;
 
@@ -589,14 +501,13 @@ async function handleUpdate(request, env, origin, token) {
     return json({ error: 'Missing id or updates' }, 400, origin);
   }
 
+  const token = await getGitHubAppToken(env);
   const currentNoteFile = await githubGetFile(`notes/${id}.json`, env, token);
   if (!currentNoteFile?.data) {
     return json({ error: 'Note not found' }, 404, origin);
   }
 
   const currentMetaFile = await githubGetFile(`meta/${id}.json`, env, token);
-  const previousMeta = currentMetaFile?.data || (await kvGetMeta(env, id));
-
   const baseNote = currentNoteFile.data;
   const updated = {
     ...baseNote,
@@ -609,16 +520,13 @@ async function handleUpdate(request, env, origin, token) {
 
   await githubPutFile(`notes/${id}.json`, updated, env, token, `update note: ${updated.title}`, currentNoteFile.sha);
   await githubPutFile(`meta/${id}.json`, meta, env, token, `update meta: ${updated.title}`, currentMetaFile?.sha || '');
-
-  if (previousMeta?.id) {
-    await kvDetachMetaFromIndexes(env, previousMeta);
-  }
-  await kvAttachMetaToIndexes(env, meta);
+  await d1InsertMeta(env, meta);
+  await invalidateCDNCache(env, id);
 
   return json({ note: updated }, 200, origin);
 }
 
-async function handleDelete(request, env, origin, token) {
+async function handleDelete(request, env, origin) {
   const parsed = await parseJsonBody(request, origin);
   if (!parsed.ok) return parsed.response;
 
@@ -627,6 +535,7 @@ async function handleDelete(request, env, origin, token) {
     return json({ error: 'Missing id' }, 400, origin);
   }
 
+  const token = await getGitHubAppToken(env);
   const currentMetaFile = await githubGetFile(`meta/${id}.json`, env, token);
   const currentNoteFile = await githubGetFile(`notes/${id}.json`, env, token);
 
@@ -643,29 +552,30 @@ async function handleDelete(request, env, origin, token) {
     await githubDeleteFile(`meta/${id}.json`, env, token, currentMetaFile.sha, `delete meta: ${title}`);
   }
 
-  const meta = currentMetaFile?.data || (await kvGetMeta(env, id));
-  if (meta?.id) {
-    await kvDetachMetaFromIndexes(env, meta);
-  }
+  await d1DeleteMeta(env, id);
+  await invalidateCDNCache(env, id);
 
   return json({ ok: true }, 200, origin);
 }
 
+// ============================================================================
+// Worker Entry Points
+// ============================================================================
+
 export default {
   async scheduled(event, env) {
-    // Scheduled sync every hour via Cloudflare Cron (from CDN, no auth needed)
+    // Scheduled sync every hour
     try {
-      const metas = await fetchMetaIndexFromCDN(env);
-      await rebuildKvFromMetas(env, metas);
-      await env.META_KV.put(KV_SYNC_TIMESTAMP, String(Date.now()));
-      console.log(`[Cron] Synced KV with ${metas.length} notes from CDN`);
+      const token = await getGitHubAppToken(env);
+      const count = await syncD1FromGitHub(env, token);
+      console.log(`[Cron] Synced D1 with ${count} notes from GitHub`);
     } catch (error) {
       console.error('[Cron] Sync failed:', error instanceof Error ? error.message : 'Unknown error');
     }
   },
 
   async fetch(request, env) {
-    const origin = env.ALLOWED_ORIGIN || '*';
+    const origin = getAllowedOrigin(env);
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -673,34 +583,7 @@ export default {
     }
 
     try {
-      if (url.pathname === '/notes/meta' && request.method === 'GET') {
-        return await handleNotesMeta(request, env, origin);
-      }
-
-      if (url.pathname === '/notes/sync' && request.method === 'POST') {
-        const auth = await assertWriteAuthorized(request, env, origin);
-        if (!auth.ok) return auth.response;
-        return await handleNotesSync(env, origin, auth.token);
-      }
-
-      if (url.pathname === '/notes/create' && request.method === 'POST') {
-        const auth = await assertWriteAuthorized(request, env, origin);
-        if (!auth.ok) return auth.response;
-        return await handleCreate(request, env, origin, auth.token);
-      }
-
-      if (url.pathname === '/notes/update' && request.method === 'POST') {
-        const auth = await assertWriteAuthorized(request, env, origin);
-        if (!auth.ok) return auth.response;
-        return await handleUpdate(request, env, origin, auth.token);
-      }
-
-      if (url.pathname === '/notes/delete' && request.method === 'POST') {
-        const auth = await assertWriteAuthorized(request, env, origin);
-        if (!auth.ok) return auth.response;
-        return await handleDelete(request, env, origin, auth.token);
-      }
-
+      // OAuth endpoint for frontend compatibility (user login)
       if (url.pathname === '/oauth/token' && request.method === 'POST') {
         const parsed = await parseJsonBody(request, origin);
         if (!parsed.ok) return parsed.response;
@@ -708,15 +591,16 @@ export default {
         const code = parsed.body?.code;
         if (!code) return json({ error: 'Missing code' }, 400, origin);
 
-        const ghRes = await fetch('https://github.com/login/oauth/access_token', {
+        const { clientId, clientSecret } = getOAuthConfig(env);
+        const ghRes = await fetch(GITHUB.OAUTH_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
           body: JSON.stringify({
-            client_id: env.GITHUB_CLIENT_ID,
-            client_secret: env.GITHUB_CLIENT_SECRET,
+            client_id: clientId,
+            client_secret: clientSecret,
             code,
           }),
         });
@@ -727,6 +611,33 @@ export default {
         }
 
         return json({ access_token: data.access_token }, 200, origin);
+      }
+
+      if (url.pathname === '/notes/meta' && request.method === 'GET') {
+        return await handleNotesMeta(request, env, origin);
+      }
+
+      // Specific routes BEFORE pattern matching
+      if (url.pathname === '/notes/sync' && request.method === 'POST') {
+        return await handleNotesSync(env, origin);
+      }
+
+      if (url.pathname === '/notes/create' && request.method === 'POST') {
+        return await handleCreate(request, env, origin);
+      }
+
+      if (url.pathname === '/notes/update' && request.method === 'POST') {
+        return await handleUpdate(request, env, origin);
+      }
+
+      if (url.pathname === '/notes/delete' && request.method === 'POST') {
+        return await handleDelete(request, env, origin);
+      }
+
+      // GET /notes/:id - Get note content from CDN (must be AFTER specific routes)
+      const noteMatch = url.pathname.match(/^\/notes\/([^\/]+)$/);
+      if (noteMatch && request.method === 'GET') {
+        return await handleNoteGet(request, env, origin, noteMatch[1]);
       }
 
       return json({ error: 'Not found' }, 404, origin);
