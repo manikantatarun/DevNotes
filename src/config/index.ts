@@ -71,8 +71,8 @@ const DEFAULT_REPO = {
  * Used when environment variables are not set
  */
 const DEFAULT_CONFIG = {
-  workerUrl: 'https://patch-jscache-devnotes.manikanta-tarun.workers.dev',
-  githubClientId: 'Ov23liGfeE9zIi8ekes4',
+  workerUrl: 'https://devnotes.manikanta-tarun.workers.dev',
+  githubClientId: 'Iv23lim4G6FNdDuTf6o6',
   appBaseUrl: 'https://manikantatarun.github.io/DevNotes',
 } as const;
 
