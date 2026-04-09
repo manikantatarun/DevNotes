@@ -132,7 +132,9 @@ export class GitHubStorageService implements IStorageService {
 
   private publicFileUrl(path: string): string {
     const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
-    return `https://raw.githubusercontent.com/${this.cfg.owner}/${this.cfg.repo}/${this.cfg.branch}/${encodedPath}`;
+    // Use jsDelivr CDN for better performance and global distribution
+    // No cache busting needed since image filenames are unique (timestamp + random suffix)
+    return `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@${this.cfg.branch}/${encodedPath}`;
   }
 
   // ── meta helper ───────────────────────────────────────────────────────────
@@ -205,8 +207,12 @@ export class GitHubStorageService implements IStorageService {
   }
 
   private async cdnGet<T>(path: string): Promise<T | null> {
-    // Add a cache-bust only for meta (fresh data); notes are immutable until edited
-    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@latest/${path}`;
+    // Use 5-minute interval cache busting for very fresh content
+    // Rounds down to nearest 5-minute interval: 14:32:47 -> 14:30
+    const now = new Date();
+    const minutes = Math.floor(now.getMinutes() / 5) * 5;
+    const cacheKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(minutes).padStart(2, '0')}`;
+    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@${this.cfg.branch}/${path}?v=${cacheKey}`;
     const res = await fetch(url);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`CDN fetch error ${res.status} on ${path}`);

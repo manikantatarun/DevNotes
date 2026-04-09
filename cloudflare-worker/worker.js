@@ -1,19 +1,19 @@
 /**
- * Cloudflare Worker – GitHub App + D1 metadata + KV cache + CDN content
+ * Cloudflare Worker – GitHub App + D1 metadata + KV query cache
  *
  * Architecture:
- * - D1: Metadata storage with full-text search
- * - KV: Cache for CDN responses and GitHub App tokens
- * - GitHub App: Authentication for write operations
- * - jsDelivr CDN: Reading note content (cached in KV)
+ * - D1: Metadata storage with full-text search (SQLite)
+ * - KV: Cache for D1 query results (60s TTL) and GitHub App tokens (1hr TTL)
+ * - GitHub App: Authentication for write operations (5000 req/hr rate limit)
+ * - jsDelivr CDN: Note content read directly by frontend (not cached here)
  *
  * Endpoints:
- *   GET  /notes/meta         - Query metadata from D1
- *   GET  /notes/:id          - Get note content from CDN (cached)
- *   POST /notes/sync         - Sync metadata from GitHub to D1
- *   POST /notes/create       - Create new note
- *   POST /notes/update       - Update existing note
- *   POST /notes/delete       - Delete note
+ *   POST /oauth/token        - Exchange OAuth code for user token
+ *   GET  /notes/meta         - Query metadata from D1 (cached)
+ *   POST /notes/sync         - Sync metadata from GitHub to D1 (auth required)
+ *   POST /notes/create       - Create new note (auth required)
+ *   POST /notes/update       - Update existing note (auth required)
+ *   POST /notes/delete       - Delete note (auth required)
  */
 
 import { getGitHubAppToken } from './github-app-auth.js';
@@ -167,6 +167,96 @@ async function githubDeleteFile(path, env, token, sha, message) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || `GitHub delete error ${res.status}`);
   }
+}
+
+// ============================================================================
+// User Authentication & Authorization
+// ============================================================================
+
+/**
+ * Parse authentication token from request headers
+ */
+function parseAuthToken(request) {
+  const auth = request.headers.get('Authorization') || '';
+  const match = auth.match(/^(Bearer|token)\s+(.+)$/i);
+  if (match?.[2]) return match[2].trim();
+
+  const alt = request.headers.get('X-GitHub-Token') || request.headers.get('x-github-token');
+  if (alt) return alt.trim();
+
+  return null;
+}
+
+/**
+ * Fetch GitHub user information
+ */
+async function githubGetUser(token) {
+  const res = await fetch(`${GITHUB.API_BASE}/user`, {
+    headers: githubHeaders(token),
+  });
+
+  if (res.ok) {
+    return res.json();
+  }
+
+  // Fallback for environments expecting Bearer token format
+  if (res.status === 401) {
+    const retry = await fetch(`${GITHUB.API_BASE}/user`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': GITHUB.API_VERSION,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (retry.ok) return retry.json();
+  }
+
+  return null;
+}
+
+/**
+ * Check if user has write access to the data repository
+ */
+async function checkWriteAccess(token, env, userLogin) {
+  const { owner, repo } = getRepoConfig(env);
+  const res = await fetch(
+    `${GITHUB.API_BASE}/repos/${owner}/${repo}/collaborators/${userLogin}/permission`,
+    { headers: githubHeaders(token) },
+  );
+  
+  if (res.status === 403 || res.status === 404) return false;
+  if (!res.ok) return false;
+  
+  const data = await res.json();
+  const permission = data.role_name ?? data.permission ?? '';
+  return WRITE_PERMISSIONS.includes(permission);
+}
+
+/**
+ * Assert user is authenticated and has write access
+ * Returns { ok: true, token, user } if authorized
+ * Returns { ok: false, response } with error response if not
+ */
+async function assertWriteAuthorized(request, env, origin) {
+  const token = parseAuthToken(request);
+  if (!token) {
+    return { ok: false, response: json({ error: 'Missing Authorization token' }, 401, origin) };
+  }
+
+  const user = await githubGetUser(token);
+  if (!user?.login) {
+    return { ok: false, response: json({ error: 'Invalid GitHub token' }, 401, origin) };
+  }
+
+  const allowed = await checkWriteAccess(token, env, user.login);
+  if (!allowed) {
+    return { 
+      ok: false, 
+      response: json({ error: 'No write access to data repo' }, 403, origin) 
+    };
+  }
+
+  return { ok: true, token, user };
 }
 
 // ============================================================================
@@ -326,40 +416,40 @@ function rowToMeta(row) {
 }
 
 // ============================================================================
-// CDN + KV Cache Functions
+// D1 Query Cache Functions
 // ============================================================================
 
-async function getCDNNoteContent(env, id) {
-  const cacheKey = `${CACHE_KEYS.CDN_NOTE_PREFIX}${id}`;
-  
-  // Try cache first
-  const cached = await env.CACHE_KV.get(cacheKey, 'json');
-  if (cached) {
-    return cached;
-  }
-
-  // Fetch from CDN
-  const { owner, repo, branch } = getRepoConfig(env);
-  const cdnUrl = getCDNUrl(owner, repo, branch, `notes/${id}.json`);
-  
-  const response = await fetch(cdnUrl);
-  if (!response.ok) {
-    if (response.status === 404) return null;
-    throw new Error(`CDN fetch failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  
-  // Cache with TTL
-  await env.CACHE_KV.put(cacheKey, JSON.stringify(data), {
-    expirationTtl: CACHE_TTL.CDN_CONTENT,
-  });
-
-  return data;
+function buildQueryCacheKey(params) {
+  // Create a stable cache key from query parameters
+  const parts = [];
+  if (params.type) parts.push(`t:${params.type}`);
+  if (params.category) parts.push(`c:${params.category}`);
+  if (params.language) parts.push(`l:${params.language}`);
+  if (params.tag) parts.push(`tag:${params.tag}`);
+  if (params.q) parts.push(`q:${params.q}`);
+  parts.push(`p:${params.page}`);
+  parts.push(`ps:${params.pageSize}`);
+  return `${CACHE_KEYS.D1_QUERY_PREFIX}${parts.join('|')}`;
 }
 
-async function invalidateCDNCache(env, id) {
-  await env.CACHE_KV.delete(`${CACHE_KEYS.CDN_NOTE_PREFIX}${id}`);
+async function getCachedQueryResult(env, params) {
+  const cacheKey = buildQueryCacheKey(params);
+  const cached = await env.CACHE_KV.get(cacheKey, 'json');
+  return cached;
+}
+
+async function setCachedQueryResult(env, params, result) {
+  const cacheKey = buildQueryCacheKey(params);
+  await env.CACHE_KV.put(cacheKey, JSON.stringify(result), {
+    expirationTtl: CACHE_TTL.D1_QUERY,
+  });
+}
+
+async function invalidateAllQueryCache(env) {
+  // Delete all query cache keys
+  // Note: KV doesn't support prefix delete, so we rely on TTL expiration
+  // For immediate invalidation, we could track keys in a list, but TTL is simpler
+  // Cache will auto-expire in 60 seconds anyway
 }
 
 // ============================================================================
@@ -432,25 +522,15 @@ async function handleNotesMeta(request, env, origin) {
   return json(result, 200, origin, `public, max-age=${CACHE_TTL.D1_QUERY}`);
 }
 
-async function handleNoteGet(request, env, origin, id) {
-  try {
-    const content = await getCDNNoteContent(env, id);
-    if (!content) {
-      return json({ error: 'Note not found' }, 404, origin);
-    }
-    return json(content, 200, origin, `public, max-age=${CACHE_TTL.CDN_CONTENT}`);
-  } catch (error) {
-    return json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch note' },
-      500,
-      origin
-    );
-  }
-}
+async function handleNotesSync(request, env, origin) {
+  // Verify user has write access
+  const auth = await assertWriteAuthorized(request, env, origin);
+  if (!auth.ok) return auth.response;
 
-async function handleNotesSync(env, origin) {
+  // Use GitHub App token for sync (higher rate limits)
   const token = await getGitHubAppToken(env);
   const count = await syncD1FromGitHub(env, token);
+  await invalidateAllQueryCache(env);
   return json({ ok: true, count }, 200, origin);
 }
 
@@ -471,6 +551,10 @@ async function parseJsonBody(request, origin) {
 }
 
 async function handleCreate(request, env, origin) {
+  // Verify user has write access
+  const auth = await assertWriteAuthorized(request, env, origin);
+  if (!auth.ok) return auth.response;
+
   const parsed = await parseJsonBody(request, origin);
   if (!parsed.ok) return parsed.response;
 
@@ -479,6 +563,7 @@ async function handleCreate(request, env, origin) {
     return json({ error: 'Missing note payload' }, 400, origin);
   }
 
+  // Use GitHub App token for GitHub operations
   const token = await getGitHubAppToken(env);
   const id = generateId();
   const ts = nowMs();
@@ -488,11 +573,16 @@ async function handleCreate(request, env, origin) {
   await githubPutFile(`notes/${id}.json`, note, env, token, `add note: ${note.title}`);
   await githubPutFile(`meta/${id}.json`, meta, env, token, `add meta: ${note.title}`);
   await d1InsertMeta(env, meta);
+  await invalidateAllQueryCache(env);
 
   return json({ note }, 200, origin);
 }
 
 async function handleUpdate(request, env, origin) {
+  // Verify user has write access
+  const auth = await assertWriteAuthorized(request, env, origin);
+  if (!auth.ok) return auth.response;
+
   const parsed = await parseJsonBody(request, origin);
   if (!parsed.ok) return parsed.response;
 
@@ -501,6 +591,7 @@ async function handleUpdate(request, env, origin) {
     return json({ error: 'Missing id or updates' }, 400, origin);
   }
 
+  // Use GitHub App token for GitHub operations
   const token = await getGitHubAppToken(env);
   const currentNoteFile = await githubGetFile(`notes/${id}.json`, env, token);
   if (!currentNoteFile?.data) {
@@ -521,12 +612,16 @@ async function handleUpdate(request, env, origin) {
   await githubPutFile(`notes/${id}.json`, updated, env, token, `update note: ${updated.title}`, currentNoteFile.sha);
   await githubPutFile(`meta/${id}.json`, meta, env, token, `update meta: ${updated.title}`, currentMetaFile?.sha || '');
   await d1InsertMeta(env, meta);
-  await invalidateCDNCache(env, id);
+  await invalidateAllQueryCache(env);
 
   return json({ note: updated }, 200, origin);
 }
 
 async function handleDelete(request, env, origin) {
+  // Verify user has write access
+  const auth = await assertWriteAuthorized(request, env, origin);
+  if (!auth.ok) return auth.response;
+
   const parsed = await parseJsonBody(request, origin);
   if (!parsed.ok) return parsed.response;
 
@@ -535,6 +630,7 @@ async function handleDelete(request, env, origin) {
     return json({ error: 'Missing id' }, 400, origin);
   }
 
+  // Use GitHub App token for GitHub operations
   const token = await getGitHubAppToken(env);
   const currentMetaFile = await githubGetFile(`meta/${id}.json`, env, token);
   const currentNoteFile = await githubGetFile(`notes/${id}.json`, env, token);
@@ -553,7 +649,7 @@ async function handleDelete(request, env, origin) {
   }
 
   await d1DeleteMeta(env, id);
-  await invalidateCDNCache(env, id);
+  await invalidateAllQueryCache(env);
 
   return json({ ok: true }, 200, origin);
 }
@@ -619,7 +715,7 @@ export default {
 
       // Specific routes BEFORE pattern matching
       if (url.pathname === '/notes/sync' && request.method === 'POST') {
-        return await handleNotesSync(env, origin);
+        return await handleNotesSync(request, env, origin);
       }
 
       if (url.pathname === '/notes/create' && request.method === 'POST') {
@@ -632,12 +728,6 @@ export default {
 
       if (url.pathname === '/notes/delete' && request.method === 'POST') {
         return await handleDelete(request, env, origin);
-      }
-
-      // GET /notes/:id - Get note content from CDN (must be AFTER specific routes)
-      const noteMatch = url.pathname.match(/^\/notes\/([^\/]+)$/);
-      if (noteMatch && request.method === 'GET') {
-        return await handleNoteGet(request, env, origin, noteMatch[1]);
       }
 
       return json({ error: 'Not found' }, 404, origin);
