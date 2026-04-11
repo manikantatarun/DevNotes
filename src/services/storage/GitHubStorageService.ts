@@ -457,8 +457,29 @@ export class GitHubStorageService implements IStorageService {
   }
 
   async getNote(id: string): Promise<Note | null> {
-    // Always fetch full note file (CDN-first, API fallback)
-    const full = await this.readFileData<Note>(this.notePath(id));
+    // Try CDN first for performance
+    let full: Note | null = null;
+    
+    try {
+      full = await this.cdnGet<Note>(this.notePath(id));
+      
+      // If note was updated recently (within 10 minutes), refetch from API
+      // to ensure we have the absolute latest content (CDN may be stale)
+      if (full && full.updatedAt) {
+        const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+        if (full.updatedAt > tenMinutesAgo) {
+          // Recently updated - bypass CDN and fetch from API for freshness
+          const fromApi = await this.apiGet<Note>(this.notePath(id));
+          if (fromApi?.data) {
+            full = fromApi.data;
+          }
+        }
+      }
+    } catch {
+      // CDN failed, try API
+      const fromApi = await this.apiGet<Note>(this.notePath(id));
+      full = fromApi?.data ?? null;
+    }
 
     if (full) return full;
 

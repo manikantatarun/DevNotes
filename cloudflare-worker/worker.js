@@ -117,6 +117,58 @@ function buildFilterConditions(params) {
   return { whereClause, bindings };
 }
 
+/**
+ * Normalize note structure based on type to prevent field contamination.
+ * Removes type-specific fields that don't belong to the current type.
+ * 
+ * This ensures:
+ * - QA notes only have question/answer
+ * - Coding notes only have problem/solution(s)
+ * - General notes only have content
+ */
+function normalizeNoteByType(note) {
+  const base = {
+    id: note.id,
+    type: note.type,
+    category: note.category,
+    title: note.title,
+    tags: note.tags || [],
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+  };
+
+  if (note.type === 'coding') {
+    // Coding type: should have problem, solutions, language/languages
+    const normalized = {
+      ...base,
+      problem: note.problem || '',
+      solutions: note.solutions || [],
+    };
+    
+    // Include language fields if present
+    if (note.language) normalized.language = note.language;
+    if (note.languages) normalized.languages = note.languages;
+    
+    // Keep legacy solution field if present (for backwards compatibility)
+    if (note.solution) normalized.solution = note.solution;
+    
+    return normalized;
+  } else if (note.type === 'qa') {
+    // QA type: should have question and answer
+    return {
+      ...base,
+      question: note.question || '',
+      answer: note.answer || '',
+    };
+  } else {
+    // General type: has content field
+    return {
+      ...base,
+      content: note.content || '',
+    };
+  }
+}
+
 function noteToMeta(note) {
   const preview =
     (note.question || '').slice(0, 200) ||
@@ -884,7 +936,12 @@ async function handleCreate(request, env, origin) {
   const token = await getGitHubAppToken(env);
   const id = generateId();
   const ts = nowMs();
-  const note = { ...incoming, id, createdAt: ts, updatedAt: ts };
+  
+  // Create note with timestamps
+  const noteWithTimestamps = { ...incoming, id, createdAt: ts, updatedAt: ts };
+  
+  // Normalize: ensure only type-appropriate fields are present
+  const note = normalizeNoteByType(noteWithTimestamps);
   const meta = noteToMeta(note);
 
   await githubPutFile(`notes/${id}.json`, note, env, token, `Add ${note.type} note [${note.category}]: ${note.title}`);
@@ -917,13 +974,18 @@ async function handleUpdate(request, env, origin) {
 
   const currentMetaFile = await githubGetFile(`meta/${id}.json`, env, token);
   const baseNote = currentNoteFile.data;
-  const updated = {
+  
+  // Merge updates with base note
+  const merged = {
     ...baseNote,
     ...updates,
     id,
     createdAt: baseNote.createdAt,
     updatedAt: nowMs(),
   };
+  
+  // Normalize: remove incompatible fields if type changed
+  const updated = normalizeNoteByType(merged);
   const meta = noteToMeta(updated);
 
   await githubPutFile(`notes/${id}.json`, updated, env, token, `Update ${updated.type} note [${updated.category}]: ${updated.title}`, currentNoteFile.sha);
