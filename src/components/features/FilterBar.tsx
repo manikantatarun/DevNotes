@@ -33,6 +33,9 @@ interface FilterBarProps {
   // Results display
   remoteLoading: boolean;
   displayedCount: number;
+  
+  // Collapsed state (for viewing mode)
+  collapsed?: boolean;
 }
 
 export function FilterBar({
@@ -52,33 +55,36 @@ export function FilterBar({
   onClearFilters,
   remoteLoading,
   displayedCount,
+  collapsed = false,
 }: FilterBarProps) {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
 
   return (
-    <div className="filter-bar">
-      <div className="search-row">
-        <div className="search-box">
-          <label htmlFor="notes-search" className="search-label">Search</label>
-          <input
-            id="notes-search"
-            type="text"
-            placeholder="Search by topic, question, tag, or language"
-            value={searchTerm}
-            onChange={(e) => onSearchTermChange(e.target.value)}
-          />
-        </div>
+    <div className={`filter-bar ${collapsed ? 'collapsed' : ''}`}>
+      {!collapsed && (
+        <>
+          <div className="search-row">
+            <div className="search-box">
+              <label htmlFor="notes-search" className="search-label">Search</label>
+              <input
+                id="notes-search"
+                type="text"
+                placeholder="Search by topic, question, tag, or language"
+                value={searchTerm}
+                onChange={(e) => onSearchTermChange(e.target.value)}
+              />
+            </div>
 
-        {isFiltered && (
-          <button
-            className="btn-clear-filters"
-            onClick={onClearFilters}
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
+            {isFiltered && (
+              <button
+                className="btn-clear-filters"
+                onClick={onClearFilters}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
 
       <div className="filters-toolbar">
         <span className="filters-toolbar-label">Filter by</span>
@@ -210,6 +216,8 @@ export function FilterBar({
           <span className="results-hint">Filtered view is active</span>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

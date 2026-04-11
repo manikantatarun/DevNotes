@@ -15,6 +15,9 @@ DATA_REPO_NAME   = "devnotes-data"
 DATA_REPO_BRANCH = "main"
 GITHUB_CLIENT_ID = "Iv23lim4G6FNdDuTf6o6"  # OAuth App ID for user login
 
+# CORS Security: Enable localhost access ONLY for preview/testing (see ENV.md)
+# ENABLE_PREVIEW_CORS = "false"  # NEVER set to "true" in production!
+
 # GitHub App Configuration (set as secrets via wrangler secret put)
 # Required secrets:
 #   GITHUB_APP_ID - Your GitHub App ID

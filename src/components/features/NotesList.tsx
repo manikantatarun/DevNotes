@@ -1,15 +1,17 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useNotes } from '../../hooks/useNotes';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useAuth } from '../../context/useAuth';
 import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
 import { FilterBar } from './FilterBar';
 import type { Note, NoteType, Category } from '../../types';
-import { NOTE_TYPES, CATEGORIES } from '../../constants';
 import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
 import './NotesList.css';
+
+// Lazy load BulkImport (only needed for admins)
+const BulkImport = lazy(() => import('./BulkImport').then(module => ({ default: module.BulkImport })));
 
 interface WorkerMetaRow {
   id: string;
@@ -38,9 +40,10 @@ export function NotesList() {
   const { noteId } = useParams<{ noteId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { storageService, hasWriteAccess } = useAuth();
+  const { storageService, hasWriteAccess, token: userToken } = useAuth();
   const { notes, loading, error, getNote, createNote, updateNote, deleteNote, refresh } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [viewerNavDirection, setViewerNavDirection] = useState<'prev' | 'next' | null>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
@@ -56,6 +59,7 @@ export function NotesList() {
   const [remoteTotalPages, setRemoteTotalPages] = useState(1);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true); // Hidden by default
 
   const workerConfigured = isWorkerConfigured();
 
@@ -143,6 +147,7 @@ export function NotesList() {
   const handleSelectNote = async (note: Note, navigationDirection: 'prev' | 'next' | null = null) => {
     setViewerNavDirection(navigationDirection);
     setSelectedNote(note);
+    // Keep filters in their current state when viewing a note
     navigate(`/note/${note.id}`, { replace: false });
     try {
       const fullNote = await getNote(note.id);
@@ -172,6 +177,9 @@ export function NotesList() {
         }
       };
       void loadNoteFromUrl();
+    } else if (!noteId && selectedNote) {
+      // URL changed to home but note is still selected, clear it
+      setSelectedNote(null);
     }
   }, [noteId, selectedNote, getNote, navigate]);
 
@@ -424,8 +432,9 @@ export function NotesList() {
         note={selectedNote}
         onClose={() => {
           setViewerNavDirection(null);
-          setSelectedNote(null);
           navigate('/', { replace: false });
+          // selectedNote will be cleared by useEffect when URL updates
+          // Keep filters in their current state (don't auto-expand)
         }}
         onPrevious={() => void handleNavigateSelectedNote('prev')}
         onNext={() => void handleNavigateSelectedNote('next')}
@@ -434,23 +443,6 @@ export function NotesList() {
         positionLabel={selectedNoteIndex >= 0 ? `${selectedNoteIndex + 1} / ${displayedNotes.length}` : undefined}
         scopeLabel={viewerScopeLabel}
         navigationDirection={viewerNavDirection}
-        searchTerm={searchTerm}
-        onSearchTermChange={setSearchTerm}
-        filterType={filterType}
-        onFilterTypeChange={setFilterType}
-        filterCategories={filterCategories}
-        onFilterCategoriesChange={setFilterCategories}
-        filterLanguages={filterLanguages}
-        onFilterLanguagesChange={setFilterLanguages}
-        filterTags={filterTags}
-        onFilterTagsChange={setFilterTags}
-        availableLanguages={availableLanguages}
-        availableTags={allUsedTags}
-        popularTags={popularTags}
-        noteTypeOptions={NOTE_TYPES}
-        categoryOptions={CATEGORIES}
-        isFiltered={isFiltered}
-        onClearFilters={handleClearFilters}
         canEdit={hasWriteAccess}
         onEdit={() => {
           setEditingNote(selectedNote);
@@ -469,11 +461,25 @@ export function NotesList() {
       <div className="notes-header">
         <div className="header-top">
           <h2>Notes ({displayedCount}{isFiltered ? ` / ${notes.length}` : ''})</h2>
-          {hasWriteAccess && (
-            <button className="btn-new-note" onClick={() => setShowForm(true)}>
-              ➕ New Note
+          <div className="header-actions">
+            {hasWriteAccess && (
+              <>
+                <button className="btn-bulk-import" onClick={() => setShowBulkImport(true)}>
+                  📥 Bulk Import
+                </button>
+                <button className="btn-new-note" onClick={() => setShowForm(true)}>
+                  ➕ New Note
+                </button>
+              </>
+            )}
+            <button 
+              className="btn-toggle-filters" 
+              onClick={() => setFiltersCollapsed(!filtersCollapsed)}
+              title={filtersCollapsed ? 'Show filters' : 'Hide filters'}
+            >
+              {filtersCollapsed ? '🔍 Show Filters' : '⬆️ Hide Filters'}
             </button>
-          )}
+          </div>
         </div>
 
         <FilterBar
@@ -493,6 +499,7 @@ export function NotesList() {
           onClearFilters={handleClearFilters}
           remoteLoading={remoteLoading}
           displayedCount={displayedCount}
+          collapsed={filtersCollapsed}
         />
 
         {remoteError && (
@@ -571,6 +578,19 @@ export function NotesList() {
             </button>
           </div>
         </div>
+      )}
+
+      {showBulkImport && userToken && (
+        <Suspense fallback={<div className="modal-loading">Loading...</div>}>
+          <BulkImport
+            onClose={() => setShowBulkImport(false)}
+            onSuccess={() => {
+              refresh();
+              setShowBulkImport(false);
+            }}
+            userToken={userToken}
+          />
+        </Suspense>
       )}
     </div>
   );

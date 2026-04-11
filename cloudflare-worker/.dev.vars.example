@@ -1,0 +1,18 @@
+# Local development environment variables
+# Copy this file to .dev.vars and fill in your secrets
+# .dev.vars is gitignored for security
+
+# Enable CORS for localhost (ONLY for development/testing)
+ENABLE_PREVIEW_CORS=true
+
+# GitHub App Configuration
+GITHUB_APP_ID=YOUR_APP_ID_HERE
+GITHUB_APP_INSTALLATION_ID=YOUR_INSTALLATION_ID_HERE
+GITHUB_APP_PRIVATE_KEY=YOUR_BASE64_ENCODED_PRIVATE_KEY_HERE
+GITHUB_CLIENT_SECRET=YOUR_OAUTH_CLIENT_SECRET_HERE
+
+# Optional: Override defaults
+# ALLOWED_ORIGIN=https://manikantatarun.github.io
+# DATA_REPO_OWNER=manikantatarun
+# DATA_REPO_NAME=devnotes-data
+# DATA_REPO_BRANCH=main

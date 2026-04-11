@@ -1,21 +1,9 @@
-import type { Category, Note, NoteType } from '../../types';
+import type { Note } from '../../types';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDateTime } from '../../utils';
-import { FilterBar } from './FilterBar';
 import './NoteViewer.css';
-
-interface NoteTypeOption {
-  value: NoteType;
-  label: string;
-  icon: string;
-}
-
-interface CategoryOption {
-  value: Category;
-  label: string;
-}
 
 interface NoteViewerProps {
   note: Note;
@@ -29,23 +17,6 @@ interface NoteViewerProps {
   positionLabel?: string;
   scopeLabel?: string;
   navigationDirection?: 'prev' | 'next' | null;
-  searchTerm: string;
-  onSearchTermChange: (value: string) => void;
-  filterType: NoteType | 'all';
-  onFilterTypeChange: (value: NoteType | 'all') => void;
-  filterCategories: Category[];
-  onFilterCategoriesChange: (value: Category[]) => void;
-  filterLanguages: string[];
-  onFilterLanguagesChange: (value: string[]) => void;
-  filterTags: string[];
-  onFilterTagsChange: (value: string[]) => void;
-  availableLanguages: string[];
-  availableTags: string[];
-  popularTags: string[];
-  noteTypeOptions: readonly NoteTypeOption[];
-  categoryOptions?: readonly CategoryOption[];  // Optional now
-  isFiltered: boolean;
-  onClearFilters: () => void;
   canEdit?: boolean;
 }
 
@@ -61,20 +32,6 @@ export function NoteViewer({
   positionLabel,
   scopeLabel,
   navigationDirection = null,
-  searchTerm,
-  onSearchTermChange,
-  filterType,
-  onFilterTypeChange,
-  filterCategories,
-  onFilterCategoriesChange,
-  filterLanguages,
-  onFilterLanguagesChange,
-  availableLanguages,
-  filterTags,
-  onFilterTagsChange,
-  popularTags,
-  isFiltered,
-  onClearFilters,
   canEdit = false,
 }: NoteViewerProps) {
   const touchStartXRef = useRef<number | null>(null);
@@ -150,20 +107,13 @@ export function NoteViewer({
         ? [{ language: note.language, solution: note.solution }]
         : []))
     : [];
-  const qaSolutions = note.type === 'qa' && note.category === 'coding'
-    ? (note.solutions && note.solutions.length > 0
-      ? note.solutions
-      : (note.language && note.answer
-        ? [{ language: note.language, solution: note.answer }]
-        : []))
-    : [];
-  const qaLanguages = note.type === 'qa'
-    ? qaSolutions.map((item) => item.language).length > 0
-      ? qaSolutions.map((item) => item.language)
-      : (note.language ? [note.language] : [])
-    : [];
-  const viewerLanguages = [...qaLanguages, ...codingSolutions.map((item) => item.language)];
-  const uniqueViewerLanguages = [...new Set(viewerLanguages.filter(Boolean))];
+  
+  const qaLanguage = note.type === 'qa' && note.language ? note.language : null;
+  
+  const viewerLanguages = note.type === 'coding' 
+    ? codingSolutions.map((item) => item.language).filter(Boolean)
+    : (qaLanguage ? [qaLanguage] : []);
+  const uniqueViewerLanguages = [...new Set(viewerLanguages)];
 
   const getTypeIcon = () => {
     switch (note.type) {
@@ -239,27 +189,6 @@ export function NoteViewer({
         </div>
       </div>
 
-      <div className="viewer-filters">
-        <FilterBar
-          searchTerm={searchTerm}
-          onSearchTermChange={onSearchTermChange}
-          filterType={filterType}
-          onFilterTypeChange={onFilterTypeChange}
-          filterCategories={filterCategories}
-          onFilterCategoriesChange={onFilterCategoriesChange}
-          filterLanguages={filterLanguages}
-          onFilterLanguagesChange={onFilterLanguagesChange}
-          availableLanguages={availableLanguages}
-          filterTags={filterTags}
-          onFilterTagsChange={onFilterTagsChange}
-          popularTags={popularTags}
-          isFiltered={isFiltered}
-          onClearFilters={onClearFilters}
-          remoteLoading={false}
-          displayedCount={1}
-        />
-      </div>
-
       <button
         className="btn-side-nav btn-side-prev"
         onClick={onPrevious}
@@ -316,17 +245,7 @@ export function NoteViewer({
         {note.tags && note.tags.length > 0 && (
           <div className="viewer-tags">
             {note.tags.map((tag) => (
-              <span 
-                key={tag} 
-                className="viewer-tag clickable"
-                onClick={() => {
-                  if (onFilterTagsChange) {
-                    onFilterTagsChange([tag]);
-                    onClose();
-                  }
-                }}
-                title="Click to filter by this tag"
-              >
+              <span key={tag} className="viewer-tag">
                 #{tag}
               </span>
             ))}
@@ -340,19 +259,14 @@ export function NoteViewer({
                 <h3>Question</h3>
                 <div className="qa-content">{note.question}</div>
               </div>
-              {note.category === 'coding' && qaSolutions.length > 0 ? (
-                qaSolutions.map((item, index) => (
-                  <div key={`${item.language}-${index}`} className="coding-section">
-                    <h3>Answer ({item.language})</h3>
-                    <pre className="code-block"><code>{item.solution}</code></pre>
-                  </div>
-                ))
-              ) : (
-                <div className="qa-section">
-                  <h3>Answer</h3>
+              <div className="qa-section">
+                <h3>Answer {qaLanguage && `(${qaLanguage})`}</h3>
+                {qaLanguage ? (
+                  <pre className="code-block"><code>{note.answer}</code></pre>
+                ) : (
                   <div className="qa-content">{note.answer}</div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
 

@@ -59,11 +59,60 @@ export function getRepoConfig(env) {
 
 /**
  * Get allowed CORS origin from environment
+ * For security, localhost access is ONLY enabled when ENABLE_PREVIEW_CORS=true
  * @param {Object} env - Worker environment bindings
+ * @param {Request} request - Optional request object to detect preview environment
  * @returns {string} Allowed origin
  */
-export function getAllowedOrigin(env) {
-  return env.ALLOWED_ORIGIN || '*';
+export function getAllowedOrigin(env, request = null) {
+  const configuredOrigin = env.ALLOWED_ORIGIN || '*';
+  
+  // If wildcard, return it
+  if (configuredOrigin === '*') {
+    return '*';
+  }
+  
+  // Only allow preview CORS if explicitly enabled via environment variable
+  const previewCorsEnabled = env.ENABLE_PREVIEW_CORS === 'true';
+  
+  if (!previewCorsEnabled) {
+    // Production mode: strict CORS, only allow configured origin
+    return configuredOrigin;
+  }
+  
+  // Preview CORS enabled: detect if this is a preview deployment
+  // Preview: patch-jscache-devnotes.manikanta-tarun.workers.dev
+  // Production: devnotes.manikanta-tarun.workers.dev
+  const isPreview = request && (
+    request.url.includes('.workers.dev') && 
+    !request.url.includes('//devnotes.manikanta-tarun.workers.dev') // Check with // to avoid substring match
+  );
+  
+  // For preview deployments with CORS enabled, allow both configured origin and localhost
+  if (isPreview) {
+    return 'multi'; // Special marker for multi-origin handling
+  }
+  
+  return configuredOrigin;
+}
+
+/**
+ * Get allowed origins for preview deployments
+ * Only used when ENABLE_PREVIEW_CORS=true for security
+ * @param {Object} env - Worker environment bindings
+ * @returns {string[]} Array of allowed origins
+ */
+export function getPreviewAllowedOrigins(env) {
+  const base = env.ALLOWED_ORIGIN || 'https://manikantatarun.github.io';
+  return [
+    base,
+    'http://localhost:5173',  // Vite dev server
+    'http://localhost:4173',  // Vite preview
+    'http://localhost:3000',  // Common dev port
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:4173',
+    'http://127.0.0.1:3000',
+  ];
 }
 
 /**

@@ -6,6 +6,12 @@
   border-radius: 16px;
   background: #151921;
   border: 1px solid #2a3142;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.filter-bar.collapsed {
+  display: none; /* Completely hide when collapsed */
 }
 
 .search-row {

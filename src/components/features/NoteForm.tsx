@@ -61,29 +61,19 @@ function getCodeExtensions(language: string) {
 
 export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags = [], storageService }: NoteFormProps) {
   const [type, setType] = useState<NoteType>(initialNote?.type ?? 'qa');
-  const [category, setCategory] = useState<Category>(initialNote?.category ?? 'general');
+  const [category, setCategory] = useState<Category>(initialNote?.category ?? 'algorithms');
   const [title, setTitle] = useState(initialNote?.title ?? '');
   const [question, setQuestion] = useState(initialNote?.question ?? '');
   const [answer, setAnswer] = useState(initialNote?.answer ?? '');
-  const [qaLanguage, setQaLanguage] = useState(initialNote?.language ?? 'javascript');
+  const [qaLanguage, setQaLanguage] = useState(initialNote?.language ?? '');
   const [problem, setProblem] = useState(initialNote?.problem ?? '');
   const [codingSolutions, setCodingSolutions] = useState(() => {
     if (initialNote?.solutions && initialNote.solutions.length > 0) {
       return initialNote.solutions;
     }
 
-    if (initialNote?.type === 'coding') {
-      if (initialNote.solutions && initialNote.solutions.length > 0) {
-        return initialNote.solutions;
-      }
-
-      if (initialNote.language && initialNote.solution) {
-        return [{ language: initialNote.language, solution: initialNote.solution }];
-      }
-    }
-
-    if (initialNote?.type === 'qa' && initialNote?.category === 'coding' && initialNote.language && initialNote.answer) {
-      return [{ language: initialNote.language, solution: initialNote.answer }];
+    if (initialNote?.type === 'coding' && initialNote.language && initialNote.solution) {
+      return [{ language: initialNote.language, solution: initialNote.solution }];
     }
 
     return [{ language: 'javascript', solution: '' }];
@@ -323,29 +313,14 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags 
 
     let noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
     switch (type) {
-      case 'qa': {
-        const isCodingCategory = category === 'coding';
-        const validSolutions = codingSolutions
-          .map((item) => ({
-            language: item.language.trim(),
-            solution: item.solution.trim(),
-          }))
-          .filter((item) => item.language && item.solution);
-
-        if (isCodingCategory && validSolutions.length === 0) {
-          alert('Please add at least one code answer with language and code.');
-          return;
-        }
-
+      case 'qa':
         noteData = {
           ...baseData,
           question,
-          answer: isCodingCategory ? validSolutions[0]?.solution : answer,
-          language: isCodingCategory ? validSolutions[0]?.language : qaLanguage,
-          solutions: isCodingCategory ? validSolutions : undefined,
+          answer,
+          language: qaLanguage || undefined,
         };
         break;
-      }
       case 'coding': {
         const validSolutions = codingSolutions
           .map((item) => ({
@@ -523,32 +498,29 @@ export function NoteForm({ onSubmit, onCancel, initialNote = null, existingTags 
             />
           </div>
 
-          {category === 'coding' ? (
-            renderCodingSolutionsEditor('Add code answer...')
-          ) : (
-            <>
-              <div className="form-group">
-                <label>Language *</label>
-                <select value={qaLanguage} onChange={(e) => setQaLanguage(e.target.value)} required>
-                  {PROGRAMMING_LANGUAGES.map((lang) => (
-                    <option key={lang} value={lang}>
-                      {lang}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Answer *</label>
-                <textarea
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  placeholder="Enter the answer..."
-                  rows={5}
-                  required
-                />
-              </div>
-            </>
-          )}
+          <div className="form-group">
+            <label>Answer *</label>
+            <textarea
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              placeholder="Enter the answer..."
+              rows={8}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Language (optional)</label>
+            <select value={qaLanguage} onChange={(e) => setQaLanguage(e.target.value)}>
+              <option value="">None</option>
+              {PROGRAMMING_LANGUAGES.map((lang) => (
+                <option key={lang} value={lang}>
+                  {lang}
+                </option>
+              ))}
+            </select>
+            <small className="form-hint">Select if your answer contains code</small>
+          </div>
         </>
       )}
 

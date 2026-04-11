@@ -4,32 +4,29 @@
 
 export const NOTE_TYPES = [
   { value: 'qa', label: 'Q&A', icon: '💬' },
+  { value: 'coding', label: 'Coding', icon: '💻' },
   { value: 'blog', label: 'Blog', icon: '📝' },
 ] as const;
 
 export const CATEGORIES = [
-  { value: 'general', label: 'General' },
-  { value: 'coding', label: 'Coding' },
-  { value: 'system-design', label: 'System Design' },
   { value: 'algorithms', label: 'Algorithms' },
+  { value: 'data-structures', label: 'Data Structures' },
+  { value: 'system-design', label: 'System Design' },
+  { value: 'devops', label: 'DevOps' },
   { value: 'frontend', label: 'Frontend' },
   { value: 'backend', label: 'Backend' },
   { value: 'database', label: 'Database' },
-  { value: 'devops', label: 'DevOps' },
-  { value: 'other', label: 'Other' },
+  { value: 'web', label: 'Web Development' },
+  { value: 'mobile', label: 'Mobile' },
+  { value: 'general', label: 'General' },
 ] as const;
 
 export const PROGRAMMING_LANGUAGES = [
   'javascript',
+  'typescript',
   'python',
   'java',
-  'react',
-  'html',
-  'css',
-  'sql',
-  'bash',
   'cpp',
-  'typescript',
   'csharp',
   'go',
   'rust',
@@ -37,6 +34,16 @@ export const PROGRAMMING_LANGUAGES = [
   'ruby',
   'swift',
   'kotlin',
+  'react',
+  'html',
+  'css',
+  'sql',
+  'bash',
+  'yaml',
+  'json',
+  'groovy',
+  'markdown',
+  'text',
 ] as const;
 
 export const DEFAULT_TAGS = [

@@ -15,6 +15,7 @@
  *   POST /notes/create        - Create new note (auth required)
  *   POST /notes/update        - Update existing note (auth required)
  *   POST /notes/delete        - Delete note (auth required)
+ *   POST /notes/bulk          - Bulk import notes from JSON/CSV (auth required)
  */
 
 import { getGitHubAppToken } from './github-app-auth.js';
@@ -26,6 +27,7 @@ import {
   WRITE_PERMISSIONS,
   getRepoConfig,
   getAllowedOrigin,
+  getPreviewAllowedOrigins,
   getOAuthConfig,
   getCDNUrl,
 } from './config.js';
@@ -53,6 +55,66 @@ function normalizeText(value) {
 
 function uniq(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+/**
+ * Build WHERE clause and bindings for filtering notes
+ * Returns object with { whereClause, bindings }
+ * Ensures SELECT and COUNT queries use identical logic - prevents bugs
+ */
+function buildFilterConditions(params) {
+  const conditions = [];
+  const bindings = [];
+
+  // Filter by type
+  const type = normalizeText(params.get('type'));
+  if (type && type !== 'all') {
+    conditions.push('type = ?');
+    bindings.push(type);
+  }
+
+  // Filter by categories (multi-select)
+  const categories = params.getAll('category').filter(Boolean);
+  if (categories.length > 0) {
+    const placeholders = categories.map(() => '?').join(',');
+    conditions.push(`category IN (${placeholders})`);
+    bindings.push(...categories);
+  }
+
+  // Filter by languages (multi-select) - Use JSON functions for proper array searching
+  const languages = params.getAll('language').filter(Boolean);
+  if (languages.length > 0) {
+    const langConditions = languages.map(() => 
+      '(language = ? OR EXISTS (SELECT 1 FROM json_each(languages) WHERE json_each.value = ?))'
+    ).join(' OR ');
+    conditions.push(`(${langConditions})`);
+    languages.forEach(lang => {
+      bindings.push(lang, lang); // Once for language column, once for JSON array
+    });
+  }
+
+  // Filter by tags (multi-select - match any) - Use JSON functions for proper array searching
+  const tags = params.getAll('tag').filter(Boolean);
+  if (tags.length > 0) {
+    const tagConditions = tags.map(() => 
+      'EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)'
+    ).join(' OR ');
+    conditions.push(`(${tagConditions})`);
+    bindings.push(...tags);
+  }
+
+  // Full-text search
+  const q = params.get('q');
+  if (q && q.trim()) {
+    conditions.push('id IN (SELECT notes_meta.id FROM notes_meta JOIN notes_fts ON notes_meta.rowid = notes_fts.rowid WHERE notes_fts MATCH ?)');
+    bindings.push(q.trim());
+  }
+
+  const whereClause = conditions.length > 0 
+    ? 'WHERE ' + conditions.join(' AND ')
+    : '';
+
+  return { whereClause, bindings };
 }
 
 function noteToMeta(note) {
@@ -265,150 +327,142 @@ async function assertWriteAuthorized(request, env, origin) {
 // ============================================================================
 
 async function d1InsertMeta(env, meta) {
-  const stmt = env.DB.prepare(`
-    INSERT OR REPLACE INTO notes_meta
-    (id, type, category, title, language, tags, languages, preview, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  try {
+    // Validate meta object structure
+    if (!meta || !meta.id || !meta.type) {
+      throw new Error('Invalid metadata: id and type are required');
+    }
 
-  await stmt.bind(
-    meta.id,
-    meta.type,
-    meta.category,
-    meta.title,
-    meta.language || '',
-    JSON.stringify(meta.tags || []),
-    JSON.stringify(meta.languages || []),
-    meta.preview || '',
-    meta.createdAt || Date.now(),
-    meta.updatedAt || Date.now()
-  ).run();
+    const stmt = env.DB.prepare(`
+      INSERT OR REPLACE INTO notes_meta
+      (id, type, category, title, language, tags, languages, preview, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = await stmt.bind(
+      meta.id,
+      meta.type,
+      meta.category,
+      meta.title,
+      meta.language || '',
+      JSON.stringify(meta.tags || []),
+      JSON.stringify(meta.languages || []),
+      meta.preview || '',
+      meta.createdAt || Date.now(),
+      meta.updatedAt || Date.now()
+    ).run();
+
+    if (!result.meta || result.meta.changes === 0) {
+      console.warn(`Insert/replace returned 0 changes for note ${meta.id}`);
+    }
+
+    return result;
+  } catch (error) {
+    console.error('D1 insert error:', error);
+    throw new Error(`Failed to insert metadata for ${meta.id}: ${error.message}`);
+  }
 }
 
 async function d1DeleteMeta(env, id) {
-  await env.DB.prepare('DELETE FROM notes_meta WHERE id = ?').bind(id).run();
+  try {
+    if (!id) {
+      throw new Error('Note ID is required for deletion');
+    }
+
+    const result = await env.DB.prepare('DELETE FROM notes_meta WHERE id = ?').bind(id).run();
+    
+    if (!result.meta || result.meta.changes === 0) {
+      console.warn(`Delete returned 0 changes for note ${id} - note may not exist`);
+    }
+
+    return result;
+  } catch (error) {
+    console.error('D1 delete error:', error);
+    throw new Error(`Failed to delete metadata for ${id}: ${error.message}`);
+  }
 }
 
 async function d1GetMeta(env, id) {
-  const result = await env.DB.prepare('SELECT * FROM notes_meta WHERE id = ?').bind(id).first();
-  if (!result) return null;
-  return rowToMeta(result);
+  try {
+    if (!id) {
+      throw new Error('Note ID is required for retrieval');
+    }
+
+    const result = await env.DB.prepare('SELECT * FROM notes_meta WHERE id = ?').bind(id).first();
+    
+    if (!result) {
+      return null;
+    }
+
+    // Validate row structure before converting
+    if (!result.id || !result.type) {
+      console.error('Invalid row structure from D1:', result);
+      throw new Error('Database returned invalid row structure');
+    }
+
+    return rowToMeta(result);
+  } catch (error) {
+    console.error('D1 get error:', error);
+    throw new Error(`Failed to get metadata for ${id}: ${error.message}`);
+  }
 }
 
 async function d1QueryMeta(env, params) {
-  let query = 'SELECT * FROM notes_meta WHERE 1=1';
-  const bindings = [];
+  try {
+    // Build WHERE clause and bindings (used for both SELECT and COUNT)
+    const { whereClause, bindings } = buildFilterConditions(params);
 
-  // Filter by type
-  const type = normalizeText(params.get('type'));
-  if (type && type !== 'all') {
-    query += ' AND type = ?';
-    bindings.push(type);
-  }
+    // Pagination parameters
+    const page = Math.max(PAGINATION.DEFAULT_PAGE, Number(params.get('page') || PAGINATION.DEFAULT_PAGE));
+    const pageSize = Math.min(
+      PAGINATION.MAX_PAGE_SIZE,
+      Math.max(1, Number(params.get('pageSize') || PAGINATION.DEFAULT_PAGE_SIZE))
+    );
+    const offset = (page - 1) * pageSize;
 
-  // Filter by categories (multi-select)
-  const categories = params.getAll('category').filter(Boolean);
-  if (categories.length > 0) {
-    const placeholders = categories.map(() => '?').join(',');
-    query += ` AND category IN (${placeholders})`;
-    bindings.push(...categories);
-  }
-
-  // Filter by languages (multi-select)
-  const languages = params.getAll('language').filter(Boolean);
-  if (languages.length > 0) {
-    const langConditions = languages.map(() => '(language = ? OR languages LIKE ?)').join(' OR ');
-    query += ` AND (${langConditions})`;
-    languages.forEach(lang => {
-      bindings.push(lang, `%"${lang}"%`);
-    });
-  }
-
-  // Filter by tags (multi-select - match any)
-  const tags = params.getAll('tag').filter(Boolean);
-  if (tags.length > 0) {
-    const tagConditions = tags.map(() => 'tags LIKE ?').join(' OR ');
-    query += ` AND (${tagConditions})`;
-    tags.forEach(tag => {
-      bindings.push(`%"${tag}"%`);
-    });
-  }
-
-  // Full-text search
-  const q = params.get('q');
-  if (q && q.trim()) {
-    // Use FTS if available
-    const ftsQuery = `
-      SELECT notes_meta.* FROM notes_meta
-      JOIN notes_fts ON notes_meta.rowid = notes_fts.rowid
-      WHERE notes_fts MATCH ?
+    // Main query with pagination
+    const query = `
+      SELECT * FROM notes_meta 
+      ${whereClause}
+      ORDER BY updated_at DESC
+      LIMIT ? OFFSET ?
     `;
-    const ftsBindings = [q.trim()];
-    
-    // If we have filters, we need to apply them too
-    if (bindings.length > 0) {
-      query += ' AND id IN (' + ftsQuery.replace('SELECT notes_meta.*', 'SELECT notes_meta.id') + ')';
-      bindings.push(...ftsBindings);
-    } else {
-      query = ftsQuery;
-      bindings.push(...ftsBindings);
+    const queryBindings = [...bindings, pageSize, offset];
+
+    const stmt = env.DB.prepare(query);
+    const result = await stmt.bind(...queryBindings).all();
+
+    // Validate query result structure
+    if (!result || !Array.isArray(result.results)) {
+      console.error('Invalid D1 query result structure:', result);
+      throw new Error('Database returned invalid query result');
     }
+
+    // Count query (uses same WHERE clause - guaranteed consistency)
+    const countQuery = `SELECT COUNT(*) as count FROM notes_meta ${whereClause}`;
+    const countStmt = env.DB.prepare(countQuery);
+    const countResult = bindings.length > 0
+      ? await countStmt.bind(...bindings).first()
+      : await countStmt.first();
+
+    if (!countResult || typeof countResult.count !== 'number') {
+      console.error('Invalid count result:', countResult);
+      throw new Error('Database returned invalid count result');
+    }
+
+    const total = countResult.count;
+
+    return {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      rows: result.results.map(rowToMeta),
+    };
+  } catch (error) {
+    console.error('D1 query error:', error);
+    throw new Error(`Database query failed: ${error.message}`);
   }
-
-  // Order by updated_at descending
-  query += ' ORDER BY updated_at DESC';
-
-  // Pagination
-  const page = Math.max(PAGINATION.DEFAULT_PAGE, Number(params.get('page') || PAGINATION.DEFAULT_PAGE));
-  const pageSize = Math.min(
-    PAGINATION.MAX_PAGE_SIZE,
-    Math.max(1, Number(params.get('pageSize') || PAGINATION.DEFAULT_PAGE_SIZE))
-  );
-  const offset = (page - 1) * pageSize;
-
-  query += ' LIMIT ? OFFSET ?';
-  bindings.push(pageSize, offset);
-
-  const stmt = env.DB.prepare(query);
-  const result = await stmt.bind(...bindings).all();
-
-  // Get total count for pagination
-  let countQuery = 'SELECT COUNT(*) as count FROM notes_meta WHERE 1=1';
-  const countBindings = bindings.slice(0, bindings.length - 2); // Remove LIMIT and OFFSET
-
-  if (type && type !== 'all') {
-    countQuery += ' AND type = ?';
-  }
-  if (categories.length > 0) {
-    const placeholders = categories.map(() => '?').join(',');
-    countQuery += ` AND category IN (${placeholders})`;
-  }
-  if (languages.length > 0) {
-    const langConditions = languages.map(() => '(language = ? OR languages LIKE ?)').join(' OR ');
-    countQuery += ` AND (${langConditions})`;
-  }
-  if (tags.length > 0) {
-    const tagConditions = tags.map(() => 'tags LIKE ?').join(' OR ');
-    countQuery += ` AND (${tagConditions})`;
-  }
-  if (q && q.trim()) {
-    countQuery += ' AND id IN (SELECT notes_meta.id FROM notes_meta JOIN notes_fts ON notes_meta.rowid = notes_fts.rowid WHERE notes_fts MATCH ?)';
-  }
-
-  const countStmt = env.DB.prepare(countQuery);
-  const countResult = countBindings.length > 0 
-    ? await countStmt.bind(...countBindings).first()
-    : await countStmt.first();
-
-  const total = countResult?.count || 0;
-
-  return {
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    rows: result.results.map(rowToMeta),
-  };
 }
 
 function rowToMeta(row) {
@@ -431,15 +485,30 @@ function rowToMeta(row) {
 // ============================================================================
 
 function buildQueryCacheKey(params) {
-  // Create a stable cache key from query parameters
+  // Create a stable cache key from query parameters (multi-select aware)
   const parts = [];
-  if (params.type) parts.push(`t:${params.type}`);
-  if (params.category) parts.push(`c:${params.category}`);
-  if (params.language) parts.push(`l:${params.language}`);
-  if (params.tag) parts.push(`tag:${params.tag}`);
-  if (params.q) parts.push(`q:${params.q}`);
-  parts.push(`p:${params.page}`);
-  parts.push(`ps:${params.pageSize}`);
+  
+  const type = params.get ? params.get('type') : params.type;
+  if (type && type !== 'all') parts.push(`t:${type}`);
+  
+  // Multi-select parameters - sort for consistent keys
+  const categories = params.getAll ? params.getAll('category').filter(Boolean).sort() : [];
+  if (categories.length > 0) parts.push(`c:${categories.join(',')}`);
+  
+  const languages = params.getAll ? params.getAll('language').filter(Boolean).sort() : [];
+  if (languages.length > 0) parts.push(`l:${languages.join(',')}`);
+  
+  const tags = params.getAll ? params.getAll('tag').filter(Boolean).sort() : [];
+  if (tags.length > 0) parts.push(`tag:${tags.join(',')}`);
+  
+  const q = params.get ? params.get('q') : params.q;
+  if (q && q.trim()) parts.push(`q:${q.trim()}`);
+  
+  const page = params.get ? params.get('page') : params.page;
+  const pageSize = params.get ? params.get('pageSize') : params.pageSize;
+  parts.push(`p:${page || 1}`);
+  parts.push(`ps:${pageSize || 50}`);
+  
   return `${CACHE_KEYS.D1_QUERY_PREFIX}${parts.join('|')}`;
 }
 
@@ -454,16 +523,125 @@ async function setCachedQueryResult(env, params, result) {
   await env.CACHE_KV.put(cacheKey, JSON.stringify(result), {
     expirationTtl: CACHE_TTL.D1_QUERY,
   });
+  
+  // Track this cache key for selective invalidation
+  await trackCacheKey(env, cacheKey);
 }
 
-async function invalidateAllQueryCache(env) {
-  // Delete all query cache keys
-  // Note: KV doesn't support prefix delete, so we rely on TTL expiration
-  // For immediate invalidation, we could track keys in a list, but TTL is simpler
-  // Cache will auto-expire in 60 seconds anyway
+/**
+ * Track active cache keys for selective invalidation
+ */
+async function trackCacheKey(env, cacheKey) {
+  try {
+    const trackerKey = `${CACHE_KEYS.D1_QUERY_PREFIX}tracker`;
+    const existing = await env.CACHE_KV.get(trackerKey, 'json') || [];
+    
+    // Add new key if not already tracked (limit to 1000 keys)
+    if (!existing.includes(cacheKey) && existing.length < 1000) {
+      existing.push(cacheKey);
+      await env.CACHE_KV.put(trackerKey, JSON.stringify(existing), {
+        expirationTtl: CACHE_TTL.D1_QUERY + 60, // Slightly longer than cache TTL
+      });
+    }
+  } catch (error) {
+    // Non-fatal: tracking failure doesn't break caching
+    console.error('Cache key tracking error:', error);
+  }
+}
+
+/**
+ * Get cache keys that should be invalidated based on note metadata
+ */
+function getAffectedCachePatterns(meta) {
+  const patterns = [];
   
-  // Invalidate popular tags cache when notes are modified
-  await env.CACHE_KV.delete(CACHE_KEYS.POPULAR_TAGS);
+  if (!meta) {
+    // No metadata - invalidate all queries (but not tag filters)
+    return [`${CACHE_KEYS.D1_QUERY_PREFIX}`];
+  }
+  
+  // Queries filtered by this note's type
+  if (meta.type) {
+    patterns.push(`t:${meta.type}`);
+  }
+  
+  // Queries filtered by this note's category
+  if (meta.category) {
+    patterns.push(`c:${meta.category}`);
+  }
+  
+  // Queries filtered by this note's language(s)
+  if (meta.language) {
+    patterns.push(`l:${meta.language}`);
+  }
+  if (meta.languages && Array.isArray(meta.languages)) {
+    meta.languages.forEach(lang => patterns.push(`l:${lang}`));
+  }
+  
+  // Queries filtered by this note's tags
+  if (meta.tags && Array.isArray(meta.tags)) {
+    meta.tags.forEach(tag => patterns.push(`tag:${tag}`));
+  }
+  
+  // Queries without filters ("all" query) - invalidate page 1
+  patterns.push(`${CACHE_KEYS.D1_QUERY_PREFIX}p:1`);
+  
+  return patterns;
+}
+
+/**
+ * Invalidate caches affected by note changes
+ * @param {Object} env - Worker environment
+ * @param {Object} meta - Note metadata (optional, for selective invalidation)
+ */
+async function invalidateCache(env, meta = null) {
+  try {
+    // Always invalidate popular tags cache when notes are modified
+    await env.CACHE_KV.delete(CACHE_KEYS.POPULAR_TAGS);
+
+    // Selective query cache invalidation
+    const patterns = getAffectedCachePatterns(meta);
+    const trackerKey = `${CACHE_KEYS.D1_QUERY_PREFIX}tracker`;
+    const trackedKeys = await env.CACHE_KV.get(trackerKey, 'json') || [];
+    
+    let deletedCount = 0;
+    
+    // Delete cache keys matching affected patterns
+    for (const cacheKey of trackedKeys) {
+      // Check if this cache key matches any affected pattern
+      const shouldDelete = patterns.some(pattern => cacheKey.includes(pattern));
+      
+      if (shouldDelete) {
+        await env.CACHE_KV.delete(cacheKey);
+        deletedCount++;
+      }
+    }
+    
+    // Update tracker to remove deleted keys
+    const remainingKeys = trackedKeys.filter(key => 
+      !patterns.some(pattern => key.includes(pattern))
+    );
+    
+    if (remainingKeys.length !== trackedKeys.length) {
+      await env.CACHE_KV.put(trackerKey, JSON.stringify(remainingKeys), {
+        expirationTtl: CACHE_TTL.D1_QUERY + 60,
+      });
+    }
+    
+    if (meta) {
+      console.log(`Selective cache invalidation: deleted ${deletedCount} query caches for note ${meta.id}`);
+    } else {
+      console.log(`Full cache invalidation: deleted ${deletedCount} query caches`);
+    }
+  } catch (error) {
+    // Don't fail the operation if cache invalidation fails
+    console.error('Cache invalidation error (non-fatal):', error);
+  }
+}
+
+// Alias for backward compatibility
+async function invalidateAllQueryCache(env, meta = null) {
+  return invalidateCache(env, meta);
 }
 
 // ============================================================================
@@ -507,23 +685,45 @@ async function fetchMetaIndexViaGitHubAPI(env, token) {
 }
 
 async function syncD1FromGitHub(env, token) {
-  const metas = await fetchMetaIndexViaGitHubAPI(env, token);
-  
-  // Clear existing data
-  await env.DB.prepare('DELETE FROM notes_meta').run();
-  
-  // Insert all metadata
-  for (const meta of metas) {
-    await d1InsertMeta(env, meta);
+  try {
+    const metas = await fetchMetaIndexViaGitHubAPI(env, token);
+    
+    if (!Array.isArray(metas)) {
+      throw new Error('Invalid metadata array from GitHub');
+    }
+
+    console.log(`Starting sync: ${metas.length} notes from GitHub`);
+    
+    // Clear existing data
+    const deleteResult = await env.DB.prepare('DELETE FROM notes_meta').run();
+    console.log(`Cleared ${deleteResult.meta?.changes || 0} existing notes`);
+    
+    // Insert all metadata with error tracking
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const meta of metas) {
+      try {
+        await d1InsertMeta(env, meta);
+        successCount++;
+      } catch (err) {
+        failCount++;
+        console.error(`Failed to sync note ${meta.id}:`, err.message);
+      }
+    }
+
+    // Update sync timestamp
+    await env.DB.prepare(`
+      INSERT OR REPLACE INTO sync_state (key, value, updated_at)
+      VALUES ('last_sync', ?, ?)
+    `).bind(String(Date.now()), Date.now()).run();
+
+    console.log(`Sync complete: ${successCount} succeeded, ${failCount} failed`);
+    return successCount;
+  } catch (error) {
+    console.error('Sync failed:', error);
+    throw new Error(`GitHub sync failed: ${error.message}`);
   }
-
-  // Update sync timestamp
-  await env.DB.prepare(`
-    INSERT OR REPLACE INTO sync_state (key, value, updated_at)
-    VALUES ('last_sync', ?, ?)
-  `).bind(String(Date.now()), Date.now()).run();
-
-  return metas.length;
 }
 
 // ============================================================================
@@ -533,6 +733,12 @@ async function syncD1FromGitHub(env, token) {
 async function handleNotesMeta(request, env, origin) {
   const url = new URL(request.url);
   const params = url.searchParams;
+  
+  // Check cache first
+  const cached = await getCachedQueryResult(env, params);
+  if (cached) {
+    return json(cached, 200, origin, `public, max-age=${CACHE_TTL.D1_QUERY}`);
+  }
   
   // Track tag filter usage (for popular tags algorithm)
   const tags = params.getAll('tag').filter(Boolean);
@@ -547,7 +753,12 @@ async function handleNotesMeta(request, env, origin) {
     });
   }
   
+  // Query database
   const result = await d1QueryMeta(env, params);
+  
+  // Cache the result
+  await setCachedQueryResult(env, params, result);
+  
   return json(result, 200, origin, `public, max-age=${CACHE_TTL.D1_QUERY}`);
 }
 
@@ -636,7 +847,7 @@ async function handleNotesSync(request, env, origin) {
   // Use GitHub App token for sync (higher rate limits)
   const token = await getGitHubAppToken(env);
   const count = await syncD1FromGitHub(env, token);
-  await invalidateAllQueryCache(env);
+  await invalidateCache(env);
   return json({ ok: true, count }, 200, origin);
 }
 
@@ -676,10 +887,10 @@ async function handleCreate(request, env, origin) {
   const note = { ...incoming, id, createdAt: ts, updatedAt: ts };
   const meta = noteToMeta(note);
 
-  await githubPutFile(`notes/${id}.json`, note, env, token, `add note: ${note.title}`);
-  await githubPutFile(`meta/${id}.json`, meta, env, token, `add meta: ${note.title}`);
+  await githubPutFile(`notes/${id}.json`, note, env, token, `Add ${note.type} note [${note.category}]: ${note.title}`);
+  await githubPutFile(`meta/${id}.json`, meta, env, token, `Add meta [${note.category}]: ${note.title}`);
   await d1InsertMeta(env, meta);
-  await invalidateAllQueryCache(env);
+  await invalidateCache(env, meta);
 
   return json({ note }, 200, origin);
 }
@@ -715,10 +926,10 @@ async function handleUpdate(request, env, origin) {
   };
   const meta = noteToMeta(updated);
 
-  await githubPutFile(`notes/${id}.json`, updated, env, token, `update note: ${updated.title}`, currentNoteFile.sha);
-  await githubPutFile(`meta/${id}.json`, meta, env, token, `update meta: ${updated.title}`, currentMetaFile?.sha || '');
+  await githubPutFile(`notes/${id}.json`, updated, env, token, `Update ${updated.type} note [${updated.category}]: ${updated.title}`, currentNoteFile.sha);
+  await githubPutFile(`meta/${id}.json`, meta, env, token, `Update meta [${updated.category}]: ${updated.title}`, currentMetaFile?.sha || '');
   await d1InsertMeta(env, meta);
-  await invalidateAllQueryCache(env);
+  await invalidateCache(env, meta);
 
   return json({ note: updated }, 200, origin);
 }
@@ -748,16 +959,245 @@ async function handleDelete(request, env, origin) {
   const title = currentNoteFile?.data?.title || currentMetaFile?.data?.title || id;
 
   if (currentNoteFile?.sha) {
-    await githubDeleteFile(`notes/${id}.json`, env, token, currentNoteFile.sha, `delete note: ${title}`);
+    await githubDeleteFile(`notes/${id}.json`, env, token, currentNoteFile.sha, `Delete note: ${title}`);
   }
   if (currentMetaFile?.sha) {
-    await githubDeleteFile(`meta/${id}.json`, env, token, currentMetaFile.sha, `delete meta: ${title}`);
+    await githubDeleteFile(`meta/${id}.json`, env, token, currentMetaFile.sha, `Delete meta: ${title}`);
   }
 
   await d1DeleteMeta(env, id);
-  await invalidateAllQueryCache(env);
+  // Invalidate cache (no metadata available for deleted note)
+  await invalidateCache(env);
 
   return json({ ok: true }, 200, origin);
+}
+
+/**
+ * Parse CSV content to array of note objects
+ * Expected CSV format: type,category,title,question/problem,answer/solution,tags,language
+ */
+function parseCSV(csvText) {
+  const lines = csvText.trim().split('\n');
+  if (lines.length < 2) {
+    throw new Error('CSV must have header and at least one data row');
+  }
+
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const notes = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim());
+    if (values.length === 0 || !values[0]) continue; // Skip empty lines
+
+    const note = {};
+    headers.forEach((header, index) => {
+      const value = values[index] || '';
+      
+      // Map CSV column names to note fields
+      if (header === 'type') note.type = value;
+      else if (header === 'category') note.category = value;
+      else if (header === 'title') note.title = value;
+      else if (header === 'question' || header === 'problem' || header === 'content') {
+        if (note.type === 'qa') note.question = value;
+        else if (note.type === 'coding') note.problem = value;
+        else if (note.type === 'blog') note.content = value;
+      }
+      else if (header === 'answer' || header === 'solution') {
+        if (note.type === 'qa') note.answer = value;
+        else if (note.type === 'coding') note.solution = value;
+      }
+      else if (header === 'tags') {
+        note.tags = value ? value.split('|').map(t => t.trim()).filter(Boolean) : [];
+      }
+      else if (header === 'language') note.language = value;
+    });
+
+    if (note.type && note.category && note.title) {
+      notes.push(note);
+    }
+  }
+
+  return notes;
+}
+
+/**
+ * Validate a note object has required fields
+ */
+function validateNote(note) {
+  const errors = [];
+
+  if (!note.type || !['qa', 'coding', 'blog'].includes(note.type)) {
+    errors.push('Invalid or missing type (must be qa, coding, or blog)');
+  }
+  
+  if (!note.category) {
+    errors.push('Missing category');
+  }
+  
+  if (!note.title || note.title.length < 3) {
+    errors.push('Missing or too short title (min 3 characters)');
+  }
+
+  // Type-specific validation
+  if (note.type === 'qa' && !note.question) {
+    errors.push('QA notes must have a question');
+  }
+  if (note.type === 'coding' && !note.problem) {
+    errors.push('Coding notes must have a problem');
+  }
+  if (note.type === 'coding' && !note.solution) {
+    errors.push('Coding notes must have a solution');
+  }
+
+  return errors;
+}
+
+async function handleBulkImport(request, env, origin) {
+  // Verify user has write access
+  const auth = await assertWriteAuthorized(request, env, origin);
+  if (!auth.ok) return auth.response;
+
+  const parsed = await parseJsonBody(request, origin);
+  if (!parsed.ok) return parsed.response;
+
+  const { format, data } = parsed.body || {};
+  
+  if (!format || !['json', 'csv'].includes(format)) {
+    return json({ error: 'Invalid format. Must be "json" or "csv"' }, 400, origin);
+  }
+  
+  if (!data) {
+    return json({ error: 'Missing data payload' }, 400, origin);  
+  }
+
+  // Parse notes based on format
+  let notes;
+  try {
+    if (format === 'json') {
+      notes = Array.isArray(data) ? data : JSON.parse(data);
+      if (!Array.isArray(notes)) {
+        throw new Error('JSON data must be an array of notes');
+      }
+    } else {
+      // CSV format
+      notes = parseCSV(typeof data === 'string' ? data : JSON.stringify(data));
+    }
+  } catch (err) {
+    return json({ error: `Parse error: ${err.message}` }, 400, origin);
+  }
+
+  if (notes.length === 0) {
+    return json({ error: 'No valid notes found in data' }, 400, origin);
+  }
+
+  if (notes.length > 100) {
+    return json({ error: 'Maximum 100 notes per batch' }, 400, origin);
+  }
+
+  // Validate all notes first
+  const validationResults = notes.map((note, index) => ({
+    index,
+    note,
+    errors: validateNote(note),
+  }));
+
+  const invalid = validationResults.filter(r => r.errors.length > 0);
+  if (invalid.length > 0) {
+    return json({
+      error: 'Validation failed',
+      invalidNotes: invalid.map(r => ({
+        index: r.index,
+        title: r.note.title || '(no title)',
+        errors: r.errors,
+      })),
+    }, 400, origin);
+  }
+
+  // Prepare all notes and metadata
+  const token = await getGitHubAppToken(env);
+  const preparedNotes = notes.map((incoming, i) => {
+    const id = generateId();
+    const ts = nowMs();
+    const note = {
+      ...incoming,
+      id,
+      createdAt: ts,
+      updatedAt: ts,
+      tags: incoming.tags || [],
+    };
+    return {
+      index: i,
+      note,
+      meta: noteToMeta(note),
+    };
+  });
+
+  // Execute D1 insertions as atomic batch transaction
+  try {
+    const batch = preparedNotes.map(({ meta }) =>
+      env.DB.prepare(
+        'INSERT OR REPLACE INTO notes_meta (id, type, category, title, language, languages, tags, preview, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(
+        meta.id,
+        meta.type,
+        meta.category,
+        meta.title,
+        meta.language,
+        JSON.stringify(meta.languages),
+        JSON.stringify(meta.tags),
+        meta.preview,
+        meta.createdAt,
+        meta.updatedAt
+      )
+    );
+
+    // All-or-nothing D1 batch transaction
+    await env.DB.batch(batch);
+  } catch (err) {
+    return json({
+      error: 'Database transaction failed',
+      details: err.message,
+      note: 'No notes were imported',
+    }, 500, origin);
+  }
+
+  // D1 transaction succeeded, now commit to GitHub
+  const results = {
+    success: [],
+    failed: [],
+  };
+
+  for (const { index, note, meta } of preparedNotes) {
+    try {
+      await githubPutFile(`notes/${note.id}.json`, note, env, token, `Bulk import ${note.type} [${note.category}]: ${note.title}`);
+      await githubPutFile(`meta/${note.id}.json`, meta, env, token, `Bulk import meta [${note.category}]: ${note.title}`);
+
+      results.success.push({
+        index,
+        id: note.id,
+        title: note.title,
+      });
+    } catch (err) {
+      results.failed.push({
+        index,
+        title: note.title || '(no title)',
+        error: err.message,
+      });
+      // Note: D1 already committed, but GitHub failed
+      // Consider adding a cleanup/rollback mechanism here
+    }
+  }
+
+  // Invalidate cache after bulk import (bulk operation affects many filters)
+  await invalidateCache(env);
+
+  return json({
+    ok: true,
+    total: notes.length, 
+    succeeded: results.success.length,
+    failed: results.failed.length,
+    results,
+  }, 200, origin);
 }
 
 // ============================================================================
@@ -777,7 +1217,23 @@ export default {
   },
 
   async fetch(request, env) {
-    const origin = getAllowedOrigin(env);
+    // Determine allowed origin with security checks
+    // CORS is strict by default - localhost only allowed when ENABLE_PREVIEW_CORS=true
+    const allowedOriginConfig = getAllowedOrigin(env, request);
+    let origin = allowedOriginConfig;
+    
+    // For preview deployments with multi-origin support
+    if (allowedOriginConfig === 'multi') {
+      const requestOrigin = request.headers.get('Origin');
+      const allowedOrigins = getPreviewAllowedOrigins(env);
+      
+      if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+        origin = requestOrigin; // Use the actual origin from request
+      } else {
+        origin = allowedOrigins[0]; // Fallback to production origin
+      }
+    }
+    
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -838,6 +1294,10 @@ export default {
 
       if (url.pathname === '/notes/delete' && request.method === 'POST') {
         return await handleDelete(request, env, origin);
+      }
+
+      if (url.pathname === '/notes/bulk' && request.method === 'POST') {
+        return await handleBulkImport(request, env, origin);
       }
 
       return json({ error: 'Not found' }, 404, origin);

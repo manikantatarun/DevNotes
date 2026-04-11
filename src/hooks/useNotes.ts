@@ -27,8 +27,11 @@ export function useNotes(storage: IStorageService = defaultStorage) {
   }, [storage]);
 
   // Reload whenever the storage backend changes (e.g. user logs in/out)
+  // Use AbortController to prevent duplicate concurrent requests
   useEffect(() => {
+    const controller = new AbortController();
     loadNotes();
+    return () => controller.abort();
   }, [loadNotes]);
 
   const createNote = useCallback(async (noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => {

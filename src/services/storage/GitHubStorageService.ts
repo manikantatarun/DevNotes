@@ -71,6 +71,10 @@ export class GitHubStorageService implements IStorageService {
   private legacyIndexPath = 'index.json';
   private legacyNotesPath = 'notes.json';
   private cfg: GitHubStorageConfig;
+  
+  // Request deduplication: cache in-flight requests to prevent duplicates
+  private requestCache = new Map<string, { timestamp: number; promise: Promise<any> }>();
+  private readonly CACHE_TTL = 5000; // 5 seconds
 
   constructor(cfg: GitHubStorageConfig) {
     this.cfg = cfg;
@@ -212,7 +216,7 @@ export class GitHubStorageService implements IStorageService {
     const now = new Date();
     const minutes = Math.floor(now.getMinutes() / 5) * 5;
     const cacheKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(minutes).padStart(2, '0')}`;
-    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@${this.cfg.branch}/${path}?v=${cacheKey}`;
+    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@latest/${path}?v=${cacheKey}`;
     const res = await fetch(url);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`CDN fetch error ${res.status} on ${path}`);
@@ -236,6 +240,15 @@ export class GitHubStorageService implements IStorageService {
       throw new Error('Worker URL not configured');
     }
 
+    // Request deduplication: if same request is in progress, return cached promise
+    const cacheKey = `${init.method || 'GET'}:${path}`;
+    const cached = this.requestCache.get(cacheKey);
+    const now = Date.now();
+    
+    if (cached && now - cached.timestamp < this.CACHE_TTL) {
+      return cached.promise;
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(init.headers as Record<string, string> | undefined),
@@ -246,34 +259,51 @@ export class GitHubStorageService implements IStorageService {
       headers['X-GitHub-Token'] = this.cfg.token;
     }
 
-    const res = await fetch(`${this.workerUrl}${path}`, {
+    const requestPromise = fetch(`${this.workerUrl}${path}`, {
       ...init,
       headers,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string; message?: string }).error ?? (err as { message?: string }).message ?? `Worker error ${res.status}`);
+      }
+      return res.json() as Promise<T>;
+    }).finally(() => {
+      // Clean up cache entry after request completes
+      this.requestCache.delete(cacheKey);
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error((err as { error?: string; message?: string }).error ?? (err as { message?: string }).message ?? `Worker error ${res.status}`);
-    }
+    // Cache the promise
+    this.requestCache.set(cacheKey, { timestamp: now, promise: requestPromise });
 
-    return res.json() as Promise<T>;
+    return requestPromise;
   }
 
   private async getNotesFromWorker(): Promise<Note[]> {
-    const pageSize = 100;
+    const pageSize = 20; // Larger page size to reduce requests
     const first = await this.workerRequest<WorkerMetaResponse>(`/notes/meta?page=1&pageSize=${pageSize}`, {
       method: 'GET',
     });
 
-    let rows = [...first.rows];
-    for (let page = 2; page <= first.totalPages; page += 1) {
-      const next = await this.workerRequest<WorkerMetaResponse>(`/notes/meta?page=${page}&pageSize=${pageSize}`, {
-        method: 'GET',
-      });
-      rows = rows.concat(next.rows);
+    // If all notes fit in first page, return immediately
+    if (first.totalPages === 1) {
+      return first.rows.map((meta) => this.metaToNote(meta));
     }
 
-    return rows.map((meta) => this.metaToNote(meta));
+    // Fetch remaining pages in PARALLEL (not sequential)
+    const pagePromises: Promise<WorkerMetaResponse>[] = [];
+    for (let page = 2; page <= first.totalPages; page += 1) {
+      pagePromises.push(
+        this.workerRequest<WorkerMetaResponse>(`/notes/meta?page=${page}&pageSize=${pageSize}`, {
+          method: 'GET',
+        })
+      );
+    }
+
+    const restPages = await Promise.all(pagePromises);
+    const allRows = [...first.rows, ...restPages.flatMap(p => p.rows)];
+
+    return allRows.map((meta) => this.metaToNote(meta));
   }
 
   private async putFile(path: string, data: unknown, sha: string, message: string): Promise<void> {

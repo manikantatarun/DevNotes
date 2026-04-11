@@ -1,0 +1,353 @@
+.bulk-import-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.bulk-import-modal {
+  background: #1a1f2e;
+  border-radius: 16px;
+  max-width: 650px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid #2a3142;
+}
+
+.bulk-import-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #2a3142;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.bulk-import-header h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.btn-close {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 1.25rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.btn-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.bulk-import-content {
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.format-selector {
+  margin-bottom: 1.5rem;
+}
+
+.format-selector label {
+  display: block;
+  color: #b6bbc2;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.format-options {
+  display: flex;
+  gap: 1rem;
+}
+
+.format-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.75rem 1rem;
+  border: 1px solid #384055;
+  border-radius: 8px;
+  background: #1f2430;
+  transition: all 0.2s;
+}
+
+.format-option:hover {
+  border-color: #667eea;
+}
+
+.format-option input[type="radio"] {
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.format-option span {
+  color: #e4e9f2;
+  font-weight: 600;
+}
+
+.template-download {
+  margin-bottom: 1.5rem;
+  text-align: center;
+  padding: 1rem;
+  background: rgba(102, 126, 234, 0.05);
+  border-radius: 12px;
+  border: 1px dashed #667eea;
+}
+
+.btn-download-template {
+  padding: 0.75rem 1.5rem;
+  border-radius: 10px;
+  border: 1px solid #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+  color: #667eea;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-download-template:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
+  border-color: #764ba2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.template-hint {
+  margin: 0.5rem 0 0;
+  color: #9ea8b8;
+  font-size: 0.82rem;
+}
+
+.file-upload {
+  margin-bottom: 1.5rem;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-label {
+  display: block;
+  padding: 1rem;
+  border: 2px dashed #384055;
+  border-radius: 12px;
+  background: #1f2430;
+  color: #9ea8b8;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-weight: 600;
+}
+
+.file-label:hover {
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.05);
+  color: #667eea;
+}
+
+.format-help {
+  background: #151921;
+  border: 1px solid #2a3142;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.format-help h3 {
+  margin: 0 0 0.75rem;
+  color: #d4d9e1;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.format-help pre {
+  background: #0f1219;
+  border: 1px solid #2a3142;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  color: #9ea8b8;
+  line-height: 1.5;
+}
+
+.bulk-error {
+  background: rgba(255, 60, 60, 0.15);
+  border: 1px solid rgba(255, 60, 60, 0.4);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: #ff6b6b;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  font-weight: 500;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-upload,
+.btn-done {
+  padding: 0.75rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.btn-cancel {
+  background: #2a3142;
+  color: #9ea8b8;
+}
+
+.btn-cancel:hover {
+  background: #343e52;
+}
+
+.btn-upload,
+.btn-done {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.btn-upload:hover,
+.btn-done:hover {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-upload:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.bulk-result {
+  text-align: center;
+}
+
+.result-summary h3 {
+  margin: 0 0 1.5rem;
+  color: #67e8a3;
+  font-size: 1.25rem;
+}
+
+.result-stats {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.stat {
+  background: #151921;
+  border: 1px solid #2a3142;
+  border-radius: 10px;
+  padding: 1rem 1.5rem;
+  min-width: 120px;
+}
+
+.stat-label {
+  display: block;
+  color: #9ea8b8;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.stat-value {
+  display: block;
+  color: #fff;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.stat.success .stat-value {
+  color: #67e8a3;
+}
+
+.stat.failed .stat-value {
+  color: #ff6b6b;
+}
+
+.failed-notes {
+  background: rgba(255, 60, 60, 0.08);
+  border: 1px solid rgba(255, 60, 60, 0.3);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+
+.failed-notes h4 {
+  margin: 0 0 0.75rem;
+  color: #ff6b6b;
+  font-size: 0.95rem;
+}
+
+.failed-notes ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #ffb3b3;
+  font-size: 0.88rem;
+}
+
+.failed-notes li {
+  margin-bottom: 0.5rem;
+}
+
+.failed-notes strong {
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .bulk-import-modal {
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  
+  .format-options {
+    flex-direction: column;
+  }
+  
+  .result-stats {
+    flex-direction: column;
+  }
+  
+  .stat {
+    min-width: 100%;
+  }
+}
