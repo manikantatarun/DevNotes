@@ -213,10 +213,10 @@ export class GitHubStorageService implements IStorageService {
   private async cdnGet<T>(path: string): Promise<T | null> {
     // Use 5-minute interval cache busting for very fresh content
     // Rounds down to nearest 5-minute interval: 14:32:47 -> 14:30
-    // const now = new Date();
-    // const minutes = Math.floor(now.getMinutes() / 5) * 5;
-    // const cacheKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(minutes).padStart(2, '0')}`;
-    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@latest/${path}`;
+    const now = new Date();
+    const minutes = Math.floor(now.getMinutes() / 5) * 5;
+    const cacheKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(minutes).padStart(2, '0')}`;
+    const url = `${this.cdnBase}/${this.cfg.owner}/${this.cfg.repo}@latest/${path}?v=${cacheKey}`;
     const res = await fetch(url);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`CDN fetch error ${res.status} on ${path}`);
