@@ -27,6 +27,7 @@ import {
   WRITE_PERMISSIONS,
   getRepoConfig,
   getAllowedOrigin,
+  getPreviewAllowedOrigins,
   getOAuthConfig,
   getCDNUrl,
 } from './config.js';
@@ -1216,7 +1217,22 @@ export default {
   },
 
   async fetch(request, env) {
-    const origin = getAllowedOrigin(env);
+    // Determine allowed origin (with preview detection)
+    const allowedOriginConfig = getAllowedOrigin(env, request);
+    let origin = allowedOriginConfig;
+    
+    // For preview deployments with multi-origin support
+    if (allowedOriginConfig === 'multi') {
+      const requestOrigin = request.headers.get('Origin');
+      const allowedOrigins = getPreviewAllowedOrigins(env);
+      
+      if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+        origin = requestOrigin; // Use the actual origin from request
+      } else {
+        origin = allowedOrigins[0]; // Fallback to production origin
+      }
+    }
+    
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {

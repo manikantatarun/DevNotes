@@ -1,16 +1,18 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useNotes } from '../../hooks/useNotes';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useAuth } from '../../context/useAuth';
 import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
 import { FilterBar } from './FilterBar';
-import { BulkImport } from './BulkImport';
 import type { Note, NoteType, Category } from '../../types';
 import { NOTE_TYPES, CATEGORIES } from '../../constants';
 import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
 import './NotesList.css';
+
+// Lazy load BulkImport (only needed for admins)
+const BulkImport = lazy(() => import('./BulkImport').then(module => ({ default: module.BulkImport })));
 
 interface WorkerMetaRow {
   id: string;
@@ -581,14 +583,16 @@ export function NotesList() {
       )}
 
       {showBulkImport && userToken && (
-        <BulkImport
-          onClose={() => setShowBulkImport(false)}
-          onSuccess={() => {
-            refresh();
-            setShowBulkImport(false);
-          }}
-          userToken={userToken}
-        />
+        <Suspense fallback={<div className="modal-loading">Loading...</div>}>
+          <BulkImport
+            onClose={() => setShowBulkImport(false)}
+            onSuccess={() => {
+              refresh();
+              setShowBulkImport(false);
+            }}
+            userToken={userToken}
+          />
+        </Suspense>
       )}
     </div>
   );

@@ -1,8 +1,11 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { AuthButton } from './components/common/AuthButton';
-import { NotesList } from './components/features';
 import './App.css'
+
+// Lazy load the main component
+const NotesList = lazy(() => import('./components/features/NotesList').then(module => ({ default: module.NotesList })));
 
 function App() {
   return (
@@ -11,14 +14,16 @@ function App() {
         <div className="app-container">
           <Header />
           <main className="app-main">
-            <Routes>
-              <Route path="/" element={<NotesList />} />
-              <Route path="/note/:noteId" element={<NotesList />} />
-              <Route path="/qa" element={<NotesList />} />
-              <Route path="/coding" element={<NotesList />} />
-              <Route path="/blog" element={<NotesList />} />
-              <Route path="*" element={<NotesList />} />
-            </Routes>
+            <Suspense fallback={<LoadingFallback />}>
+              <Routes>
+                <Route path="/" element={<NotesList />} />
+                <Route path="/note/:noteId" element={<NotesList />} />
+                <Route path="/qa" element={<NotesList />} />
+                <Route path="/coding" element={<NotesList />} />
+                <Route path="/blog" element={<NotesList />} />
+                <Route path="*" element={<NotesList />} />
+              </Routes>
+            </Suspense>
           </main>
           <Footer />
         </div>
@@ -41,6 +46,21 @@ function Header() {
       </div>
       <AuthButton />
     </header>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="loading-container" style={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      minHeight: '400px',
+      fontSize: '1.1rem',
+      color: 'var(--text-secondary, #6b7280)'
+    }}>
+      Loading...
+    </div>
   );
 }
 
