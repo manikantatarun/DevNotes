@@ -1,6 +1,6 @@
 // Core data models
 export type NoteType = 'qa' | 'coding' | 'blog';
-export type Category = 'general' | 'coding' | 'system-design' | 'algorithms' | 'frontend' | 'backend' | 'database' | 'devops' | 'other';
+export type Category = 'algorithms' | 'data-structures' | 'system-design' | 'devops' | 'frontend' | 'backend' | 'database' | 'web' | 'mobile' | 'general';
 
 export interface CodingSolution {
   language: string;

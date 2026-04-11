@@ -150,20 +150,13 @@ export function NoteViewer({
         ? [{ language: note.language, solution: note.solution }]
         : []))
     : [];
-  const qaSolutions = note.type === 'qa' && note.category === 'coding'
-    ? (note.solutions && note.solutions.length > 0
-      ? note.solutions
-      : (note.language && note.answer
-        ? [{ language: note.language, solution: note.answer }]
-        : []))
-    : [];
-  const qaLanguages = note.type === 'qa'
-    ? qaSolutions.map((item) => item.language).length > 0
-      ? qaSolutions.map((item) => item.language)
-      : (note.language ? [note.language] : [])
-    : [];
-  const viewerLanguages = [...qaLanguages, ...codingSolutions.map((item) => item.language)];
-  const uniqueViewerLanguages = [...new Set(viewerLanguages.filter(Boolean))];
+  
+  const qaLanguage = note.type === 'qa' && note.language ? note.language : null;
+  
+  const viewerLanguages = note.type === 'coding' 
+    ? codingSolutions.map((item) => item.language).filter(Boolean)
+    : (qaLanguage ? [qaLanguage] : []);
+  const uniqueViewerLanguages = [...new Set(viewerLanguages)];
 
   const getTypeIcon = () => {
     switch (note.type) {
@@ -340,19 +333,14 @@ export function NoteViewer({
                 <h3>Question</h3>
                 <div className="qa-content">{note.question}</div>
               </div>
-              {note.category === 'coding' && qaSolutions.length > 0 ? (
-                qaSolutions.map((item, index) => (
-                  <div key={`${item.language}-${index}`} className="coding-section">
-                    <h3>Answer ({item.language})</h3>
-                    <pre className="code-block"><code>{item.solution}</code></pre>
-                  </div>
-                ))
-              ) : (
-                <div className="qa-section">
-                  <h3>Answer</h3>
+              <div className="qa-section">
+                <h3>Answer {qaLanguage && `(${qaLanguage})`}</h3>
+                {qaLanguage ? (
+                  <pre className="code-block"><code>{note.answer}</code></pre>
+                ) : (
                   <div className="qa-content">{note.answer}</div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
 

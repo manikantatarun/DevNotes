@@ -887,8 +887,8 @@ async function handleCreate(request, env, origin) {
   const note = { ...incoming, id, createdAt: ts, updatedAt: ts };
   const meta = noteToMeta(note);
 
-  await githubPutFile(`notes/${id}.json`, note, env, token, `add note: ${note.title}`);
-  await githubPutFile(`meta/${id}.json`, meta, env, token, `add meta: ${note.title}`);
+  await githubPutFile(`notes/${id}.json`, note, env, token, `Add ${note.type} note [${note.category}]: ${note.title}`);
+  await githubPutFile(`meta/${id}.json`, meta, env, token, `Add meta [${note.category}]: ${note.title}`);
   await d1InsertMeta(env, meta);
   await invalidateCache(env, meta);
 
@@ -926,8 +926,8 @@ async function handleUpdate(request, env, origin) {
   };
   const meta = noteToMeta(updated);
 
-  await githubPutFile(`notes/${id}.json`, updated, env, token, `update note: ${updated.title}`, currentNoteFile.sha);
-  await githubPutFile(`meta/${id}.json`, meta, env, token, `update meta: ${updated.title}`, currentMetaFile?.sha || '');
+  await githubPutFile(`notes/${id}.json`, updated, env, token, `Update ${updated.type} note [${updated.category}]: ${updated.title}`, currentNoteFile.sha);
+  await githubPutFile(`meta/${id}.json`, meta, env, token, `Update meta [${updated.category}]: ${updated.title}`, currentMetaFile?.sha || '');
   await d1InsertMeta(env, meta);
   await invalidateCache(env, meta);
 
@@ -959,10 +959,10 @@ async function handleDelete(request, env, origin) {
   const title = currentNoteFile?.data?.title || currentMetaFile?.data?.title || id;
 
   if (currentNoteFile?.sha) {
-    await githubDeleteFile(`notes/${id}.json`, env, token, currentNoteFile.sha, `delete note: ${title}`);
+    await githubDeleteFile(`notes/${id}.json`, env, token, currentNoteFile.sha, `Delete note: ${title}`);
   }
   if (currentMetaFile?.sha) {
-    await githubDeleteFile(`meta/${id}.json`, env, token, currentMetaFile.sha, `delete meta: ${title}`);
+    await githubDeleteFile(`meta/${id}.json`, env, token, currentMetaFile.sha, `Delete meta: ${title}`);
   }
 
   await d1DeleteMeta(env, id);
@@ -1169,8 +1169,8 @@ async function handleBulkImport(request, env, origin) {
 
   for (const { index, note, meta } of preparedNotes) {
     try {
-      await githubPutFile(`notes/${note.id}.json`, note, env, token, `bulk import: ${note.title}`);
-      await githubPutFile(`meta/${note.id}.json`, meta, env, token, `bulk import meta: ${note.title}`);
+      await githubPutFile(`notes/${note.id}.json`, note, env, token, `Bulk import ${note.type} [${note.category}]: ${note.title}`);
+      await githubPutFile(`meta/${note.id}.json`, meta, env, token, `Bulk import meta [${note.category}]: ${note.title}`);
 
       results.success.push({
         index,
