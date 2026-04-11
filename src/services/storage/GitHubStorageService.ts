@@ -73,7 +73,7 @@ export class GitHubStorageService implements IStorageService {
   private cfg: GitHubStorageConfig;
   
   // Request deduplication: cache in-flight requests to prevent duplicates
-  private requestCache = new Map<string, { timestamp: number; promise: Promise<any> }>();
+  private requestCache = new Map<string, { timestamp: number; promise: Promise<unknown> }>();
   private readonly CACHE_TTL = 5000; // 5 seconds
 
   constructor(cfg: GitHubStorageConfig) {
@@ -246,7 +246,7 @@ export class GitHubStorageService implements IStorageService {
     const now = Date.now();
     
     if (cached && now - cached.timestamp < this.CACHE_TTL) {
-      return cached.promise;
+      return cached.promise as Promise<T>;
     }
 
     const headers: Record<string, string> = {
