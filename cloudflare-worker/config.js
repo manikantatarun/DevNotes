@@ -73,9 +73,11 @@ export function getAllowedOrigin(env, request = null) {
   }
   
   // Detect if this is a preview deployment (not production)
+  // Preview: patch-jscache-devnotes.manikanta-tarun.workers.dev
+  // Production: devnotes.manikanta-tarun.workers.dev
   const isPreview = request && (
     request.url.includes('.workers.dev') && 
-    !request.url.includes('devnotes.manikanta-tarun.workers.dev') // production worker URL
+    !request.url.includes('//devnotes.manikanta-tarun.workers.dev') // Check with // to avoid substring match
   );
   
   // For preview deployments, allow both configured origin and localhost
