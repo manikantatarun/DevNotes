@@ -6,6 +6,7 @@ import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
 import { FilterBar } from './FilterBar';
+import { BulkImport } from './BulkImport';
 import type { Note, NoteType, Category } from '../../types';
 import { NOTE_TYPES, CATEGORIES } from '../../constants';
 import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
@@ -38,9 +39,10 @@ export function NotesList() {
   const { noteId } = useParams<{ noteId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { storageService, hasWriteAccess } = useAuth();
+  const { storageService, hasWriteAccess, token: userToken } = useAuth();
   const { notes, loading, error, getNote, createNote, updateNote, deleteNote, refresh } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [viewerNavDirection, setViewerNavDirection] = useState<'prev' | 'next' | null>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
@@ -470,9 +472,14 @@ export function NotesList() {
         <div className="header-top">
           <h2>Notes ({displayedCount}{isFiltered ? ` / ${notes.length}` : ''})</h2>
           {hasWriteAccess && (
-            <button className="btn-new-note" onClick={() => setShowForm(true)}>
-              ➕ New Note
-            </button>
+            <div className="header-actions">
+              <button className="btn-bulk-import" onClick={() => setShowBulkImport(true)}>
+                📥 Bulk Import
+              </button>
+              <button className="btn-new-note" onClick={() => setShowForm(true)}>
+                ➕ New Note
+              </button>
+            </div>
           )}
         </div>
 
@@ -571,6 +578,17 @@ export function NotesList() {
             </button>
           </div>
         </div>
+      )}
+
+      {showBulkImport && userToken && (
+        <BulkImport
+          onClose={() => setShowBulkImport(false)}
+          onSuccess={() => {
+            refresh();
+            setShowBulkImport(false);
+          }}
+          userToken={userToken}
+        />
       )}
     </div>
   );
