@@ -262,6 +262,121 @@ async function githubPutFile(path, data, env, token, message, sha = '') {
   }
 }
 
+/**
+ * Update both note and meta files in a single atomic commit.
+ * Uses GitHub's Git Data API to create a tree with both files.
+ */
+async function githubUpdateNoteAndMeta(id, noteData, metaData, env, token, message, noteSha, metaSha) {
+  const { owner, repo, branch } = getRepoConfig(env);
+  
+  // Get the latest commit on the branch
+  const refRes = await fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
+    headers: githubHeaders(token),
+  });
+  
+  if (!refRes.ok) {
+    throw new Error(`Failed to get branch reference: ${refRes.status}`);
+  }
+  
+  const refData = await refRes.json();
+  const latestCommitSha = refData.object.sha;
+  
+  // Get the commit to find the tree
+  const commitRes = await fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/commits/${latestCommitSha}`, {
+    headers: githubHeaders(token),
+  });
+  
+  if (!commitRes.ok) {
+    throw new Error(`Failed to get commit: ${commitRes.status}`);
+  }
+  
+  const commitData = await commitRes.json();
+  const baseTreeSha = commitData.tree.sha;
+  
+  // Create blobs for both files
+  const [noteBlob, metaBlob] = await Promise.all([
+    fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/blobs`, {
+      method: 'POST',
+      headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: encodeBase64Json(noteData),
+        encoding: 'base64',
+      }),
+    }).then(r => r.json()),
+    fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/blobs`, {
+      method: 'POST',
+      headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: encodeBase64Json(metaData),
+        encoding: 'base64',
+      }),
+    }).then(r => r.json()),
+  ]);
+  
+  // Create a new tree with both files
+  const treeRes = await fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/trees`, {
+    method: 'POST',
+    headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      base_tree: baseTreeSha,
+      tree: [
+        {
+          path: `notes/${id}.json`,
+          mode: '100644',
+          type: 'blob',
+          sha: noteBlob.sha,
+        },
+        {
+          path: `meta/${id}.json`,
+          mode: '100644',
+          type: 'blob',
+          sha: metaBlob.sha,
+        },
+      ],
+    }),
+  });
+  
+  if (!treeRes.ok) {
+    const err = await treeRes.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to create tree: ${treeRes.status}`);
+  }
+  
+  const treeData = await treeRes.json();
+  
+  // Create a new commit
+  const newCommitRes = await fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/commits`, {
+    method: 'POST',
+    headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      tree: treeData.sha,
+      parents: [latestCommitSha],
+    }),
+  });
+  
+  if (!newCommitRes.ok) {
+    const err = await newCommitRes.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to create commit: ${newCommitRes.status}`);
+  }
+  
+  const newCommitData = await newCommitRes.json();
+  
+  // Update the branch reference
+  const updateRefRes = await fetch(`${GITHUB.API_BASE}/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
+    method: 'PATCH',
+    headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sha: newCommitData.sha,
+      force: false,
+    }),
+  });
+  
+  if (!updateRefRes.ok) {
+    const err = await updateRefRes.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to update branch: ${updateRefRes.status}`);
+  }
+}
+
 async function githubDeleteFile(path, env, token, sha, message) {
   const body = {
     message,
@@ -988,8 +1103,18 @@ async function handleUpdate(request, env, origin) {
   const updated = normalizeNoteByType(merged);
   const meta = noteToMeta(updated);
 
-  await githubPutFile(`notes/${id}.json`, updated, env, token, `Update ${updated.type} note [${updated.category}]: ${updated.title}`, currentNoteFile.sha);
-  await githubPutFile(`meta/${id}.json`, meta, env, token, `Update meta [${updated.category}]: ${updated.title}`, currentMetaFile?.sha || '');
+  // Update both files in a single atomic commit
+  await githubUpdateNoteAndMeta(
+    id,
+    updated,
+    meta,
+    env,
+    token,
+    `Update note and meta [${updated.category}]: ${updated.title}`,
+    currentNoteFile.sha,
+    currentMetaFile?.sha || ''
+  );
+  
   await d1InsertMeta(env, meta);
   await invalidateCache(env, meta);
 
