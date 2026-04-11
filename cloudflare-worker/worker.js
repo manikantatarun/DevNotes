@@ -1217,7 +1217,8 @@ export default {
   },
 
   async fetch(request, env) {
-    // Determine allowed origin (with preview detection)
+    // Determine allowed origin with security checks
+    // CORS is strict by default - localhost only allowed when ENABLE_PREVIEW_CORS=true
     const allowedOriginConfig = getAllowedOrigin(env, request);
     let origin = allowedOriginConfig;
     

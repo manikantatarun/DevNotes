@@ -7,7 +7,6 @@ import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
 import { FilterBar } from './FilterBar';
 import type { Note, NoteType, Category } from '../../types';
-import { NOTE_TYPES, CATEGORIES } from '../../constants';
 import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
 import './NotesList.css';
 
@@ -60,6 +59,7 @@ export function NotesList() {
   const [remoteTotalPages, setRemoteTotalPages] = useState(1);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true); // Hidden by default
 
   const workerConfigured = isWorkerConfigured();
 
@@ -147,6 +147,7 @@ export function NotesList() {
   const handleSelectNote = async (note: Note, navigationDirection: 'prev' | 'next' | null = null) => {
     setViewerNavDirection(navigationDirection);
     setSelectedNote(note);
+    // Keep filters in their current state when viewing a note
     navigate(`/note/${note.id}`, { replace: false });
     try {
       const fullNote = await getNote(note.id);
@@ -176,6 +177,9 @@ export function NotesList() {
         }
       };
       void loadNoteFromUrl();
+    } else if (!noteId && selectedNote) {
+      // URL changed to home but note is still selected, clear it
+      setSelectedNote(null);
     }
   }, [noteId, selectedNote, getNote, navigate]);
 
@@ -428,8 +432,9 @@ export function NotesList() {
         note={selectedNote}
         onClose={() => {
           setViewerNavDirection(null);
-          setSelectedNote(null);
           navigate('/', { replace: false });
+          // selectedNote will be cleared by useEffect when URL updates
+          // Keep filters in their current state (don't auto-expand)
         }}
         onPrevious={() => void handleNavigateSelectedNote('prev')}
         onNext={() => void handleNavigateSelectedNote('next')}
@@ -438,23 +443,6 @@ export function NotesList() {
         positionLabel={selectedNoteIndex >= 0 ? `${selectedNoteIndex + 1} / ${displayedNotes.length}` : undefined}
         scopeLabel={viewerScopeLabel}
         navigationDirection={viewerNavDirection}
-        searchTerm={searchTerm}
-        onSearchTermChange={setSearchTerm}
-        filterType={filterType}
-        onFilterTypeChange={setFilterType}
-        filterCategories={filterCategories}
-        onFilterCategoriesChange={setFilterCategories}
-        filterLanguages={filterLanguages}
-        onFilterLanguagesChange={setFilterLanguages}
-        filterTags={filterTags}
-        onFilterTagsChange={setFilterTags}
-        availableLanguages={availableLanguages}
-        availableTags={allUsedTags}
-        popularTags={popularTags}
-        noteTypeOptions={NOTE_TYPES}
-        categoryOptions={CATEGORIES}
-        isFiltered={isFiltered}
-        onClearFilters={handleClearFilters}
         canEdit={hasWriteAccess}
         onEdit={() => {
           setEditingNote(selectedNote);
@@ -473,16 +461,25 @@ export function NotesList() {
       <div className="notes-header">
         <div className="header-top">
           <h2>Notes ({displayedCount}{isFiltered ? ` / ${notes.length}` : ''})</h2>
-          {hasWriteAccess && (
-            <div className="header-actions">
-              <button className="btn-bulk-import" onClick={() => setShowBulkImport(true)}>
-                📥 Bulk Import
-              </button>
-              <button className="btn-new-note" onClick={() => setShowForm(true)}>
-                ➕ New Note
-              </button>
-            </div>
-          )}
+          <div className="header-actions">
+            {hasWriteAccess && (
+              <>
+                <button className="btn-bulk-import" onClick={() => setShowBulkImport(true)}>
+                  📥 Bulk Import
+                </button>
+                <button className="btn-new-note" onClick={() => setShowForm(true)}>
+                  ➕ New Note
+                </button>
+              </>
+            )}
+            <button 
+              className="btn-toggle-filters" 
+              onClick={() => setFiltersCollapsed(!filtersCollapsed)}
+              title={filtersCollapsed ? 'Show filters' : 'Hide filters'}
+            >
+              {filtersCollapsed ? '🔍 Show Filters' : '⬆️ Hide Filters'}
+            </button>
+          </div>
         </div>
 
         <FilterBar
@@ -502,6 +499,7 @@ export function NotesList() {
           onClearFilters={handleClearFilters}
           remoteLoading={remoteLoading}
           displayedCount={displayedCount}
+          collapsed={filtersCollapsed}
         />
 
         {remoteError && (

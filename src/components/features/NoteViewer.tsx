@@ -1,21 +1,9 @@
-import type { Category, Note, NoteType } from '../../types';
+import type { Note } from '../../types';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDateTime } from '../../utils';
-import { FilterBar } from './FilterBar';
 import './NoteViewer.css';
-
-interface NoteTypeOption {
-  value: NoteType;
-  label: string;
-  icon: string;
-}
-
-interface CategoryOption {
-  value: Category;
-  label: string;
-}
 
 interface NoteViewerProps {
   note: Note;
@@ -29,23 +17,6 @@ interface NoteViewerProps {
   positionLabel?: string;
   scopeLabel?: string;
   navigationDirection?: 'prev' | 'next' | null;
-  searchTerm: string;
-  onSearchTermChange: (value: string) => void;
-  filterType: NoteType | 'all';
-  onFilterTypeChange: (value: NoteType | 'all') => void;
-  filterCategories: Category[];
-  onFilterCategoriesChange: (value: Category[]) => void;
-  filterLanguages: string[];
-  onFilterLanguagesChange: (value: string[]) => void;
-  filterTags: string[];
-  onFilterTagsChange: (value: string[]) => void;
-  availableLanguages: string[];
-  availableTags: string[];
-  popularTags: string[];
-  noteTypeOptions: readonly NoteTypeOption[];
-  categoryOptions?: readonly CategoryOption[];  // Optional now
-  isFiltered: boolean;
-  onClearFilters: () => void;
   canEdit?: boolean;
 }
 
@@ -61,20 +32,6 @@ export function NoteViewer({
   positionLabel,
   scopeLabel,
   navigationDirection = null,
-  searchTerm,
-  onSearchTermChange,
-  filterType,
-  onFilterTypeChange,
-  filterCategories,
-  onFilterCategoriesChange,
-  filterLanguages,
-  onFilterLanguagesChange,
-  availableLanguages,
-  filterTags,
-  onFilterTagsChange,
-  popularTags,
-  isFiltered,
-  onClearFilters,
   canEdit = false,
 }: NoteViewerProps) {
   const touchStartXRef = useRef<number | null>(null);
@@ -232,27 +189,6 @@ export function NoteViewer({
         </div>
       </div>
 
-      <div className="viewer-filters">
-        <FilterBar
-          searchTerm={searchTerm}
-          onSearchTermChange={onSearchTermChange}
-          filterType={filterType}
-          onFilterTypeChange={onFilterTypeChange}
-          filterCategories={filterCategories}
-          onFilterCategoriesChange={onFilterCategoriesChange}
-          filterLanguages={filterLanguages}
-          onFilterLanguagesChange={onFilterLanguagesChange}
-          availableLanguages={availableLanguages}
-          filterTags={filterTags}
-          onFilterTagsChange={onFilterTagsChange}
-          popularTags={popularTags}
-          isFiltered={isFiltered}
-          onClearFilters={onClearFilters}
-          remoteLoading={false}
-          displayedCount={1}
-        />
-      </div>
-
       <button
         className="btn-side-nav btn-side-prev"
         onClick={onPrevious}
@@ -309,17 +245,7 @@ export function NoteViewer({
         {note.tags && note.tags.length > 0 && (
           <div className="viewer-tags">
             {note.tags.map((tag) => (
-              <span 
-                key={tag} 
-                className="viewer-tag clickable"
-                onClick={() => {
-                  if (onFilterTagsChange) {
-                    onFilterTagsChange([tag]);
-                    onClose();
-                  }
-                }}
-                title="Click to filter by this tag"
-              >
+              <span key={tag} className="viewer-tag">
                 #{tag}
               </span>
             ))}

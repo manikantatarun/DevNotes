@@ -11,6 +11,12 @@
 
 .notes-header {
   margin-bottom: 1.4rem;
+  transition: margin-bottom 0.3s ease;
+}
+
+/* Optimize spacing when filters are collapsed */
+.notes-header:has(.filter-bar.collapsed) {
+  margin-bottom: 0.8rem;
 }
 
 .search-fallback-note {
@@ -40,7 +46,8 @@
 }
 
 .btn-new-note,
-.btn-bulk-import {
+.btn-bulk-import,
+.btn-toggle-filters {
   padding: 0.7rem 1.25rem;
   border-radius: 8px;
   border: none;
@@ -59,8 +66,17 @@
   background: linear-gradient(135deg, #48c6ef 0%, #6f86d6 100%);
 }
 
+.btn-toggle-filters {
+  background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+  font-size: 0.9rem;
+  padding: 0.6rem 1rem;
+  min-width: 130px;
+  white-space: nowrap;
+}
+
 .btn-new-note:hover,
-.btn-bulk-import:hover {
+.btn-bulk-import:hover,
+.btn-toggle-filters:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }

@@ -59,7 +59,7 @@ export function getRepoConfig(env) {
 
 /**
  * Get allowed CORS origin from environment
- * For preview deployments, automatically allow localhost for testing
+ * For security, localhost access is ONLY enabled when ENABLE_PREVIEW_CORS=true
  * @param {Object} env - Worker environment bindings
  * @param {Request} request - Optional request object to detect preview environment
  * @returns {string} Allowed origin
@@ -72,7 +72,15 @@ export function getAllowedOrigin(env, request = null) {
     return '*';
   }
   
-  // Detect if this is a preview deployment (not production)
+  // Only allow preview CORS if explicitly enabled via environment variable
+  const previewCorsEnabled = env.ENABLE_PREVIEW_CORS === 'true';
+  
+  if (!previewCorsEnabled) {
+    // Production mode: strict CORS, only allow configured origin
+    return configuredOrigin;
+  }
+  
+  // Preview CORS enabled: detect if this is a preview deployment
   // Preview: patch-jscache-devnotes.manikanta-tarun.workers.dev
   // Production: devnotes.manikanta-tarun.workers.dev
   const isPreview = request && (
@@ -80,7 +88,7 @@ export function getAllowedOrigin(env, request = null) {
     !request.url.includes('//devnotes.manikanta-tarun.workers.dev') // Check with // to avoid substring match
   );
   
-  // For preview deployments, allow both configured origin and localhost
+  // For preview deployments with CORS enabled, allow both configured origin and localhost
   if (isPreview) {
     return 'multi'; // Special marker for multi-origin handling
   }
@@ -90,6 +98,7 @@ export function getAllowedOrigin(env, request = null) {
 
 /**
  * Get allowed origins for preview deployments
+ * Only used when ENABLE_PREVIEW_CORS=true for security
  * @param {Object} env - Worker environment bindings
  * @returns {string[]} Array of allowed origins
  */
