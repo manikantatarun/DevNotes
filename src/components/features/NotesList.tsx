@@ -40,7 +40,7 @@ export function NotesList() {
   const { noteId } = useParams<{ noteId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { storageService, hasWriteAccess, token: userToken } = useAuth();
+  const { storageService, hasWriteAccess, token: userToken, loading: authLoading } = useAuth();
   const { notes, loading, error, getNote, createNote, updateNote, deleteNote, refresh } = useNotes(storageService);
   const [showForm, setShowForm] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -60,6 +60,7 @@ export function NotesList() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true); // Hidden by default
+  const [urlNoteLoading, setUrlNoteLoading] = useState(false);
 
   const workerConfigured = isWorkerConfigured();
 
@@ -161,27 +162,55 @@ export function NotesList() {
 
   // Load note from URL parameter
   useEffect(() => {
-    if (noteId && !selectedNote) {
+    if (noteId && selectedNote?.id !== noteId) {
+      if (authLoading || loading) {
+        return;
+      }
+
+      let cancelled = false;
       const loadNoteFromUrl = async () => {
         try {
+          setUrlNoteLoading(true);
           const note = await getNote(noteId);
+          if (cancelled) return;
+
           if (note) {
             setSelectedNote(note);
           } else {
+            const noteFromList = notes.find((item) => item.id === noteId);
+            if (noteFromList) {
+              setSelectedNote(noteFromList);
+              return;
+            }
+
             // Note not found, redirect to home
             navigate('/', { replace: true });
           }
         } catch (err) {
-          console.error('Failed to load note from URL:', err);
-          navigate('/', { replace: true });
+          if (cancelled) return;
+
+          const noteFromList = notes.find((item) => item.id === noteId);
+          if (noteFromList) {
+            setSelectedNote(noteFromList);
+          } else {
+            console.error('Failed to load note from URL:', err);
+            navigate('/', { replace: true });
+          }
+        } finally {
+          if (!cancelled) {
+            setUrlNoteLoading(false);
+          }
         }
       };
       void loadNoteFromUrl();
+      return () => {
+        cancelled = true;
+      };
     } else if (!noteId && selectedNote) {
       // URL changed to home but note is still selected, clear it
       setSelectedNote(null);
     }
-  }, [noteId, selectedNote, getNote, navigate]);
+  }, [noteId, selectedNote, authLoading, loading, notes, getNote, navigate]);
 
   const filteredNotes = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -378,6 +407,10 @@ export function NotesList() {
 
   // Close viewer if selected note doesn't match current filters
   useEffect(() => {
+    if (noteId) {
+      return;
+    }
+
     if (selectedNote && !remoteLoading) {
       const isSelectedNoteInFiltered = displayedNotes.some(note => note.id === selectedNote.id);
       if (!isSelectedNoteInFiltered) {
@@ -385,7 +418,7 @@ export function NotesList() {
         navigate('/', { replace: false });
       }
     }
-  }, [selectedNote, displayedNotes, remoteLoading, navigate]);
+  }, [noteId, selectedNote, displayedNotes, remoteLoading, navigate]);
 
   const handleNavigateSelectedNote = async (direction: 'prev' | 'next') => {
     if (!selectedNote || displayedNotes.length === 0) return;
@@ -408,7 +441,9 @@ export function NotesList() {
     setRemotePage(1);
   };
 
-  if (loading) return <div className="notes-container">Loading notes...</div>;
+  if (authLoading || loading || urlNoteLoading || (noteId && selectedNote?.id !== noteId)) {
+    return <div className="notes-container">Loading notes...</div>;
+  }
   if (error) return <div className="notes-container error">Error: {error}</div>;
 
   if (showForm) {
@@ -595,4 +630,3 @@ export function NotesList() {
     </div>
   );
 }
-
