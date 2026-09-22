@@ -9,7 +9,7 @@ const NotesList = lazy(() => import('./components/features/NotesList').then(modu
 
 function App() {
   return (
-    <BrowserRouter basename="/DevNotes">
+    <BrowserRouter basename="/">
       <AuthProvider>
         <div className="app-container">
           <Header />
