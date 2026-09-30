@@ -6,9 +6,14 @@ import './App.css'
 const AuthButton = lazy(() => import('./components/common/AuthButton').then(module => ({ default: module.AuthButton })));
 const NotesList = lazy(() => import('./components/features/NotesList').then(module => ({ default: module.NotesList })));
 
+function getRuntimeBasename(): string {
+  if (typeof window === 'undefined') return '/';
+  return window.location.pathname.toLowerCase().startsWith('/devnotes/') ? '/DevNotes' : '/';
+}
+
 function App() {
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL || '/'}>
+    <BrowserRouter basename={getRuntimeBasename()}>
       <AuthProvider>
         <div className="app-container">
           <Header />

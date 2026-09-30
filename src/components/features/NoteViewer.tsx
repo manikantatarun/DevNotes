@@ -42,8 +42,13 @@ export function NoteViewer({
     return window.matchMedia('(max-width: 768px)').matches;
   });
 
+  const getRuntimeBasePath = () => {
+    if (typeof window === 'undefined') return '';
+    return window.location.pathname.toLowerCase().startsWith('/devnotes/') ? '/DevNotes' : '';
+  };
+
   const handleShare = async () => {
-    const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+    const basePath = getRuntimeBasePath();
     const url = `${window.location.origin}${basePath}/note/${note.id}`;
     try {
       await navigator.clipboard.writeText(url);
