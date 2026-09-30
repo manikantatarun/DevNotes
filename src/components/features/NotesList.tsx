@@ -2,7 +2,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useNotes } from '../../hooks/useNotes';
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useAuth } from '../../context/useAuth';
-import { NoteForm } from './NoteForm';
 import { NoteCard } from './NoteCard';
 import { NoteViewer } from './NoteViewer';
 import { FilterBar } from './FilterBar';
@@ -10,7 +9,8 @@ import type { Note, NoteType, Category } from '../../types';
 import { API_ENDPOINTS, getWorkerUrl, isWorkerConfigured } from '../../config';
 import './NotesList.css';
 
-// Lazy load BulkImport (only needed for admins)
+// Lazy load heavy editor/form and bulk-import features only when needed
+const NoteForm = lazy(() => import('./NoteForm').then(module => ({ default: module.NoteForm })));
 const BulkImport = lazy(() => import('./BulkImport').then(module => ({ default: module.BulkImport })));
 
 interface WorkerMetaRow {
@@ -61,6 +61,8 @@ export function NotesList() {
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true); // Hidden by default
   const [urlNoteLoading, setUrlNoteLoading] = useState(false);
+  const [urlNoteError, setUrlNoteError] = useState<string | null>(null);
+  const [urlNoteRetryCount, setUrlNoteRetryCount] = useState(0);
 
   const workerConfigured = isWorkerConfigured();
 
@@ -162,55 +164,66 @@ export function NotesList() {
 
   // Load note from URL parameter
   useEffect(() => {
-    if (noteId && selectedNote?.id !== noteId) {
-      if (authLoading || loading) {
-        return;
+    if (!noteId) {
+      if (selectedNote) {
+        setSelectedNote(null);
       }
+      setUrlNoteError(null);
+      return;
+    }
 
-      let cancelled = false;
-      const loadNoteFromUrl = async () => {
-        try {
-          setUrlNoteLoading(true);
-          const note = await getNote(noteId);
-          if (cancelled) return;
+    if (selectedNote?.id === noteId) {
+      setUrlNoteError(null);
+      return;
+    }
 
-          if (note) {
-            setSelectedNote(note);
-          } else {
-            const noteFromList = notes.find((item) => item.id === noteId);
-            if (noteFromList) {
-              setSelectedNote(noteFromList);
-              return;
-            }
+    if (authLoading || loading) {
+      return;
+    }
 
-            // Note not found, redirect to home
-            navigate('/', { replace: true });
-          }
-        } catch (err) {
-          if (cancelled) return;
+    let active = true;
+    const loadNoteFromUrl = async () => {
+      try {
+        setUrlNoteLoading(true);
+        setUrlNoteError(null);
+        const note = await getNote(noteId);
+        if (!active) return;
 
+        if (note) {
+          setSelectedNote(note);
+        } else {
           const noteFromList = notes.find((item) => item.id === noteId);
           if (noteFromList) {
             setSelectedNote(noteFromList);
-          } else {
-            console.error('Failed to load note from URL:', err);
-            navigate('/', { replace: true });
+            return;
           }
-        } finally {
-          if (!cancelled) {
-            setUrlNoteLoading(false);
-          }
+
+          setUrlNoteError('This note could not be found. It may have been deleted or is no longer available.');
+          navigate('/', { replace: true });
         }
-      };
-      void loadNoteFromUrl();
-      return () => {
-        cancelled = true;
-      };
-    } else if (!noteId && selectedNote) {
-      // URL changed to home but note is still selected, clear it
-      setSelectedNote(null);
-    }
-  }, [noteId, selectedNote, authLoading, loading, notes, getNote, navigate]);
+      } catch (err) {
+        if (!active) return;
+
+        const noteFromList = notes.find((item) => item.id === noteId);
+        if (noteFromList) {
+          setSelectedNote(noteFromList);
+        } else {
+          const message = err instanceof Error ? err.message : 'The note request failed unexpectedly.';
+          console.error('Failed to load note from URL:', err);
+          setUrlNoteError(message);
+        }
+      } finally {
+        if (active) {
+          setUrlNoteLoading(false);
+        }
+      }
+    };
+
+    void loadNoteFromUrl();
+    return () => {
+      active = false;
+    };
+  }, [noteId, selectedNote, authLoading, loading, notes, getNote, navigate, urlNoteRetryCount]);
 
   const filteredNotes = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -441,23 +454,41 @@ export function NotesList() {
     setRemotePage(1);
   };
 
-  if (authLoading || loading || urlNoteLoading || (noteId && selectedNote?.id !== noteId)) {
+  const retryCurrentNote = () => {
+    if (!noteId) return;
+    setUrlNoteError(null);
+    setSelectedNote(null);
+    setUrlNoteRetryCount((count) => count + 1);
+  };
+
+  if (authLoading || loading || urlNoteLoading || (noteId && selectedNote?.id !== noteId && !urlNoteError)) {
     return <div className="notes-container">Loading notes...</div>;
+  }
+  if (urlNoteError) {
+    return (
+      <div className="notes-container error">
+        <h3>Couldn’t open this note</h3>
+        <p>{urlNoteError}</p>
+        <button className="btn-new-note" onClick={retryCurrentNote}>Retry</button>
+      </div>
+    );
   }
   if (error) return <div className="notes-container error">Error: {error}</div>;
 
   if (showForm) {
     return (
-      <NoteForm
-        initialNote={editingNote}
-        existingTags={allUsedTags}
-        storageService={storageService}
-        onSubmit={editingNote ? handleUpdateNote : handleCreateNote}
-        onCancel={() => {
-          setShowForm(false);
-          setEditingNote(null);
-        }}
-      />
+      <Suspense fallback={<div className="notes-container">Loading editor...</div>}>
+        <NoteForm
+          initialNote={editingNote}
+          existingTags={allUsedTags}
+          storageService={storageService}
+          onSubmit={editingNote ? handleUpdateNote : handleCreateNote}
+          onCancel={() => {
+            setShowForm(false);
+            setEditingNote(null);
+          }}
+        />
+      </Suspense>
     );
   }
 
