@@ -97,15 +97,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     storageService: buildStorageService(),
   });
 
-  // ── resolve a token → full auth state ──
+  const setUnauthenticated = useCallback(() => {
+    setState({
+      user: null,
+      token: null,
+      hasWriteAccess: false,
+      loading: false,
+      storageService: buildStorageService(),
+    });
+  }, []);
 
   const resolveToken = useCallback(async (token: string) => {
-    console.log('[Auth] Resolving token...');
     try {
       const user = await fetchGitHubUser(token);
-      console.log('[Auth] User fetched:', user.login);
       const hasWriteAccess = await checkWriteAccess(token, user);
-      console.log('[Auth] Write access:', hasWriteAccess);
+
       setState({
         user,
         token,
@@ -113,75 +119,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading: false,
         storageService: buildStorageService(token),
       });
-      console.log('[Auth] Auth state updated successfully');
     } catch (err) {
       console.error('[Auth] Failed to resolve token:', err);
       clearToken();
-      setState({
-        user: null,
-        token: null,
-        hasWriteAccess: false,
-        loading: false,
-        storageService: buildStorageService(),
-      });
+      setUnauthenticated();
     }
-  }, []);
+  }, [setUnauthenticated]);
 
-  // ── on mount: check for OAuth callback code OR existing session token ──
-
-  useEffect(() => {
+  const initializeAuth = useCallback(async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
-    const state = urlParams.get('state');
+    const oauthState = urlParams.get('state');
     const savedState = sessionStorage.getItem(STORAGE_KEYS.OAUTH_STATE);
 
-    if (code && state && state === savedState) {
-      // Clean URL first
+    if (code && oauthState && oauthState === savedState) {
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_STATE);
-      const clean = window.location.pathname;
-      window.history.replaceState({}, '', clean);
+      window.history.replaceState({}, '', window.location.pathname);
 
-      console.log('[Auth] Exchanging OAuth code for token...');
-      // Exchange code for token via Cloudflare Worker
-      fetch(getWorkerUrl(API_ENDPOINTS.OAUTH_TOKEN), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      })
-        .then((res) => {
-          console.log('[Auth] Token exchange response status:', res.status);
-          return res.json();
-        })
-        .then(async (data: { access_token?: string; error?: string }) => {
-          console.log('[Auth] Token exchange data:', data);
-          if (!data.access_token) throw new Error(data.error ?? 'No token returned');
-          saveToken(data.access_token);
-          console.log('[Auth] Token saved, resolving user...');
-          await resolveToken(data.access_token);
-        })
-        .catch((err) => {
-          console.error('[Auth] Token exchange failed:', err);
-          setState((prev) => ({ ...prev, loading: false }));
+      try {
+        const res = await fetch(getWorkerUrl(API_ENDPOINTS.OAUTH_TOKEN), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
         });
+
+        const data: { access_token?: string; error?: string } = await res.json();
+        if (!res.ok || !data.access_token) {
+          throw new Error(data.error ?? 'Token exchange failed');
+        }
+
+        saveToken(data.access_token);
+        await resolveToken(data.access_token);
+        return;
+      } catch (err) {
+        console.error('[Auth] Token exchange failed:', err);
+        setState((prev) => ({ ...prev, loading: false }));
+        return;
+      }
+    }
+
+    const existingToken = loadToken();
+    if (existingToken) {
+      await resolveToken(existingToken);
       return;
     }
 
-    // Check session storage for existing token
-    const existingToken = loadToken();
-    if (existingToken) {
-      console.log('[Auth] Found existing token in session storage');
-      setTimeout(() => {
-        void resolveToken(existingToken);
-      }, 0);
-    } else {
-      console.log('[Auth] No existing token found');
-      setTimeout(() => {
-        setState((prev) => ({ ...prev, loading: false }));
-      }, 0);
-    }
+    setState((prev) => ({ ...prev, loading: false }));
   }, [resolveToken]);
 
-  // ── login / logout ──
+  useEffect(() => {
+    void initializeAuth();
+  }, [initializeAuth]);
 
   const login = useCallback(() => {
     const oauthState = crypto.randomUUID();
