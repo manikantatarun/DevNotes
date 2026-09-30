@@ -10,7 +10,7 @@
     "test": "vitest run",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist -r https://github.com/manikantatarun/DevNotes.git --cname devnotes.manikantatarun.online"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",
