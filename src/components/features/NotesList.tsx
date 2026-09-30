@@ -177,15 +177,18 @@ export function NotesList() {
       return;
     }
 
+    const noteFromList = notes.find((item) => item.id === noteId) ?? null;
+
     let active = true;
     const loadWatchdog = window.setTimeout(() => {
       if (!active) return;
       setUrlNoteLoading(false);
-      setUrlNoteError('Loading this note took too long. Please retry.');
+      if (!noteFromList) {
+        setUrlNoteError('Loading this note took too long. Please retry.');
+      }
     }, 15000);
     const loadNoteFromUrl = async () => {
       try {
-        const noteFromList = notes.find((item) => item.id === noteId);
         setUrlNoteLoading(!noteFromList);
         setUrlNoteError(null);
         const note = await getNote(noteId);
@@ -193,27 +196,26 @@ export function NotesList() {
 
         if (note) {
           setSelectedNote(note);
-        } else {
-          const noteFromList = notes.find((item) => item.id === noteId);
-          if (noteFromList) {
-            setSelectedNote(noteFromList);
-            return;
-          }
-
-          setUrlNoteError('This note could not be found. It may have been deleted or is no longer available.');
-          navigate('/', { replace: true });
+          return;
         }
+
+        if (noteFromList) {
+          setSelectedNote(noteFromList);
+          return;
+        }
+
+        setUrlNoteError('This note could not be found. It may have been deleted or is no longer available.');
       } catch (err) {
         if (!active) return;
 
-        const noteFromList = notes.find((item) => item.id === noteId);
         if (noteFromList) {
           setSelectedNote(noteFromList);
-        } else {
-          const message = err instanceof Error ? err.message : 'The note request failed unexpectedly.';
-          console.error('Failed to load note from URL:', err);
-          setUrlNoteError(message);
+          return;
         }
+
+        const message = err instanceof Error ? err.message : 'The note request failed unexpectedly.';
+        console.error('Failed to load note from URL:', err);
+        setUrlNoteError(message);
       } finally {
         window.clearTimeout(loadWatchdog);
         if (active) {
@@ -227,7 +229,7 @@ export function NotesList() {
       active = false;
       window.clearTimeout(loadWatchdog);
     };
-  }, [noteId, selectedNote, notes, getNote, navigate, urlNoteRetryCount]);
+  }, [noteId, selectedNote, notes, getNote, urlNoteRetryCount]);
 
   const filteredNotes = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
