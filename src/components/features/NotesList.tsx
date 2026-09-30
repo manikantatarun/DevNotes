@@ -177,14 +177,16 @@ export function NotesList() {
       return;
     }
 
-    if (authLoading || loading) {
-      return;
-    }
-
     let active = true;
+    const loadWatchdog = window.setTimeout(() => {
+      if (!active) return;
+      setUrlNoteLoading(false);
+      setUrlNoteError('Loading this note took too long. Please retry.');
+    }, 15000);
     const loadNoteFromUrl = async () => {
       try {
-        setUrlNoteLoading(true);
+        const noteFromList = notes.find((item) => item.id === noteId);
+        setUrlNoteLoading(!noteFromList);
         setUrlNoteError(null);
         const note = await getNote(noteId);
         if (!active) return;
@@ -213,6 +215,7 @@ export function NotesList() {
           setUrlNoteError(message);
         }
       } finally {
+        window.clearTimeout(loadWatchdog);
         if (active) {
           setUrlNoteLoading(false);
         }
@@ -222,8 +225,9 @@ export function NotesList() {
     void loadNoteFromUrl();
     return () => {
       active = false;
+      window.clearTimeout(loadWatchdog);
     };
-  }, [noteId, selectedNote, authLoading, loading, notes, getNote, navigate, urlNoteRetryCount]);
+  }, [noteId, selectedNote, notes, getNote, navigate, urlNoteRetryCount]);
 
   const filteredNotes = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -461,7 +465,10 @@ export function NotesList() {
     setUrlNoteRetryCount((count) => count + 1);
   };
 
-  if (authLoading || loading || urlNoteLoading || (noteId && selectedNote?.id !== noteId && !urlNoteError)) {
+  const shouldShowInitialLoading = !noteId && (authLoading || (loading && notes.length === 0 && !selectedNote));
+  const shouldShowNoteLoading = Boolean(noteId && urlNoteLoading && !selectedNote && !urlNoteError);
+
+  if (shouldShowInitialLoading || shouldShowNoteLoading) {
     return <div className="notes-container">Loading notes...</div>;
   }
   if (urlNoteError) {
