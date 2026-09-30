@@ -3,6 +3,22 @@ import type { Note } from '../types';
 import type { IStorageService } from '../services/storage/IStorageService';
 import { storageService as defaultStorage } from '../services/storage';
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 /**
  * Custom hook for managing notes.
  * Accepts an optional storage service so the caller can swap in any backend
@@ -17,7 +33,7 @@ export function useNotes(storage: IStorageService = defaultStorage) {
     try {
       setLoading(true);
       setError(null);
-      const data = await storage.getNotes();
+      const data = await withTimeout(storage.getNotes(), 15000, 'Loading notes timed out');
       setNotes(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load notes');
@@ -47,7 +63,7 @@ export function useNotes(storage: IStorageService = defaultStorage) {
 
   const getNote = useCallback(async (id: string) => {
     try {
-      return await storage.getNote(id);
+      return await withTimeout(storage.getNote(id), 12000, 'Loading note timed out');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load note');
       throw err;

@@ -4,28 +4,25 @@
     <meta charset="utf-8" />
     <title>DevNotes</title>
     <script>
-      // Single Page Apps for GitHub Pages
-      // https://github.com/rafgraph/spa-github-pages
-      // This script redirects 404 pages to the index.html with the path encoded as a query parameter
-      (function(l) {
-        if (l.search[1] === '/' ) {
-          var decoded = l.search.slice(1).split('&').map(function(s) { 
-            return s.replace(/~and~/g, '&')
-          }).join('?');
-          window.history.replaceState(null, null,
-              l.pathname.slice(0, -1) + decoded + l.hash
-          );
-        }
-      }(window.location))
-    </script>
-    <script>
-      // Store the path in sessionStorage to be redirected after loading
-      sessionStorage.setItem('redirect', location.href.split(location.origin)[1]);
+      // GitHub Pages SPA fallback: encode current path into query and send to app entry.
+      (function (l) {
+        var isProjectPath = l.pathname.toLowerCase().indexOf('/devnotes/') === 0;
+        var basePath = isProjectPath ? '/DevNotes' : '';
+        var preservedPath = l.pathname.slice(basePath.length + 1).replace(/&/g, '~and~');
+        var preservedSearch = l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '';
 
-      // Support both root-domain deploys (/) and project-path deploys (/DevNotes/)
-      var parts = location.pathname.split('/').filter(Boolean);
-      var candidateBase = parts.length > 0 && parts[0].toLowerCase() === 'devnotes' ? '/DevNotes/' : '/';
-      location.replace(candidateBase);
+        l.replace(
+          l.protocol +
+            '//' +
+            l.hostname +
+            (l.port ? ':' + l.port : '') +
+            basePath +
+            '/?/' +
+            preservedPath +
+            preservedSearch +
+            l.hash,
+        );
+      })(window.location);
     </script>
   </head>
   <body>
