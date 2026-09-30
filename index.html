@@ -6,6 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>devnotes</title>
     <script>
+      // Ensure relative asset URLs resolve from app root even on deep links.
+      (function (l, d) {
+        var isProjectPath = l.pathname.toLowerCase().indexOf('/devnotes/') === 0;
+        var baseHref = isProjectPath ? '/DevNotes/' : '/';
+        d.write('<base href="' + baseHref + '">');
+      })(window.location, document);
+    </script>
+    <script>
       // Decode GitHub Pages SPA fallback query back into the original path.
       (function (l) {
         if (l.search[1] === '/') {
