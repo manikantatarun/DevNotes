@@ -85,6 +85,7 @@ const DEFAULT_CONFIG = {
 export const GITHUB_CONFIG = {
   clientId: import.meta.env.VITE_GITHUB_CLIENT_ID ?? DEFAULT_CONFIG.githubClientId,
   workerUrl: import.meta.env.VITE_OAUTH_WORKER_URL ?? DEFAULT_CONFIG.workerUrl,
+  oauthRedirectUri: import.meta.env.VITE_GITHUB_REDIRECT_URI?.trim() || null,
   dataRepoOwner: import.meta.env.VITE_DATA_REPO_OWNER ?? DEFAULT_REPO.owner,
   dataRepoName: import.meta.env.VITE_DATA_REPO_NAME ?? DEFAULT_REPO.name,
   dataRepoBranch: import.meta.env.VITE_DATA_REPO_BRANCH ?? DEFAULT_REPO.branch,
@@ -129,14 +130,18 @@ export function getCollaboratorPermissionUrl(username: string): string {
  * Build OAuth authorization URL
  */
 export function getOAuthAuthorizeUrl(state: string): string {
-  const redirect = encodeURIComponent(GITHUB_CONFIG.appBaseUrl);
-  return (
-    `${GITHUB_API.OAUTH_AUTHORIZE_URL}` +
-    `?client_id=${GITHUB_CONFIG.clientId}` +
-    `&redirect_uri=${redirect}` +
-    `&scope=${GITHUB_API.SCOPE}` +
-    `&state=${state}`
-  );
+  const params = new URLSearchParams({
+    client_id: GITHUB_CONFIG.clientId,
+    scope: GITHUB_API.SCOPE,
+    state,
+  });
+
+  // Only send redirect_uri when explicitly configured to match OAuth app settings.
+  if (GITHUB_CONFIG.oauthRedirectUri) {
+    params.set('redirect_uri', GITHUB_CONFIG.oauthRedirectUri);
+  }
+
+  return `${GITHUB_API.OAUTH_AUTHORIZE_URL}?${params.toString()}`;
 }
 
 /**

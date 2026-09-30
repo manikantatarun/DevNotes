@@ -76,6 +76,7 @@ Responsibilities:
 Frontend build variables (GitHub Actions repository variables):
 
 - `VITE_GITHUB_CLIENT_ID`
+- `VITE_GITHUB_REDIRECT_URI` (optional, must exactly match OAuth app callback URL)
 - `VITE_OAUTH_WORKER_URL`
 - `VITE_DATA_REPO_OWNER`
 - `VITE_DATA_REPO_NAME`
