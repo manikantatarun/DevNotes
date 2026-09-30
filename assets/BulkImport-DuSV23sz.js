@@ -1,0 +1,34 @@
+import{r as e}from"./rolldown-runtime-Dw2cE7zH.js";import{_ as t,g as n}from"./editor-vendor-BVaBtCBO.js";import{n as r,r as i}from"./index-C7d8r4-G.js";var a=e(t(),1),o=n(),s=[{type:`qa`,category:`coding`,title:`What is a closure in JavaScript?`,question:`Explain what closures are and how they work in JavaScript`,answer:`A closure is a function that has access to variables in its outer (enclosing) function scope, even after the outer function has returned. Closures are created every time a function is created.`,tags:[`javascript`,`concepts`,`functions`],language:`javascript`},{type:`coding`,category:`algorithms`,title:`Two Sum Problem`,problem:`Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.`,solution:`function twoSum(nums, target) {
+  const map = new Map();
+  for (let i = 0; i < nums.length; i++) {
+    const complement = target - nums[i];
+    if (map.has(complement)) {
+      return [map.get(complement), i];
+    }
+    map.set(nums[i], i);
+  }
+}`,tags:[`arrays`,`hashmap`,`leetcode`],language:`javascript`},{type:`blog`,category:`devops`,title:`Docker Best Practices`,content:`Here are some Docker best practices: 1. Use official base images, 2. Minimize layers, 3. Use .dockerignore, 4. Don't run as root...`,tags:[`docker`,`devops`,`best-practices`]}],c=`type,category,title,question,answer,tags,language
+qa,coding,What is a closure?,Explain closures in JavaScript,A closure is a function that has access to variables in its outer scope,javascript|concepts|functions,javascript
+coding,algorithms,Two Sum,Find two numbers that add up to target,Use hashmap to store complements,arrays|hashmap|leetcode,javascript
+blog,devops,Docker Best Practices,,,docker|devops|best-practices,`;function l({onClose:e,onSuccess:t,userToken:n}){let[l,u]=(0,a.useState)(`json`),[d,f]=(0,a.useState)(null),[p,m]=(0,a.useState)(!1),[h,g]=(0,a.useState)(null),[_,v]=(0,a.useState)(null),y=e=>{let t=e.target.files?.[0];t&&(f(t),g(null),v(null))},b=async()=>{if(!d){v(`Please select a file`);return}m(!0),v(null),g(null);try{let e=await d.text(),a=await fetch(i(r.NOTES_BULK),{method:`POST`,headers:{"Content-Type":`application/json`,"X-GitHub-Token":n},body:JSON.stringify({format:l,data:e})}),o=await a.json();if(!a.ok){v(o.error||`Upload failed`),o.invalidNotes&&console.error(`Validation errors:`,o.invalidNotes);return}g(o),o.succeeded>0&&t()}catch(e){v(e instanceof Error?e.message:`Upload failed`)}finally{m(!1)}},x=()=>{let e,t,n;l===`json`?(e=JSON.stringify(s,null,2),t=`notes-template.json`,n=`application/json`):(e=c,t=`notes-template.csv`,n=`text/csv`);let r=new Blob([e],{type:n}),i=URL.createObjectURL(r),a=document.createElement(`a`);a.href=i,a.download=t,document.body.appendChild(a),a.click(),document.body.removeChild(a),URL.revokeObjectURL(i)};return(0,o.jsx)(`div`,{className:`bulk-import-overlay`,children:(0,o.jsxs)(`div`,{className:`bulk-import-modal`,children:[(0,o.jsxs)(`div`,{className:`bulk-import-header`,children:[(0,o.jsx)(`h2`,{children:`📥 Bulk Import Notes`}),(0,o.jsx)(`button`,{className:`btn-close`,onClick:e,"aria-label":`Close`,children:`✕`})]}),(0,o.jsx)(`div`,{className:`bulk-import-content`,children:h?(0,o.jsxs)(`div`,{className:`bulk-result`,children:[(0,o.jsxs)(`div`,{className:`result-summary`,children:[(0,o.jsx)(`h3`,{children:`✅ Import Complete`}),(0,o.jsxs)(`div`,{className:`result-stats`,children:[(0,o.jsxs)(`div`,{className:`stat`,children:[(0,o.jsx)(`span`,{className:`stat-label`,children:`Total:`}),(0,o.jsx)(`span`,{className:`stat-value`,children:h.total})]}),(0,o.jsxs)(`div`,{className:`stat success`,children:[(0,o.jsx)(`span`,{className:`stat-label`,children:`Succeeded:`}),(0,o.jsx)(`span`,{className:`stat-value`,children:h.succeeded})]}),h.failed>0&&(0,o.jsxs)(`div`,{className:`stat failed`,children:[(0,o.jsx)(`span`,{className:`stat-label`,children:`Failed:`}),(0,o.jsx)(`span`,{className:`stat-value`,children:h.failed})]})]})]}),h.results.failed.length>0&&(0,o.jsxs)(`div`,{className:`failed-notes`,children:[(0,o.jsx)(`h4`,{children:`Failed Imports:`}),(0,o.jsx)(`ul`,{children:h.results.failed.map((e,t)=>(0,o.jsxs)(`li`,{children:[(0,o.jsx)(`strong`,{children:e.title}),`: `,e.error]},t))})]}),(0,o.jsx)(`button`,{className:`btn-done`,onClick:e,children:`Done`})]}):(0,o.jsxs)(o.Fragment,{children:[(0,o.jsxs)(`div`,{className:`format-selector`,children:[(0,o.jsx)(`label`,{children:`File Format:`}),(0,o.jsxs)(`div`,{className:`format-options`,children:[(0,o.jsxs)(`label`,{className:`format-option`,children:[(0,o.jsx)(`input`,{type:`radio`,value:`json`,checked:l===`json`,onChange:()=>u(`json`)}),(0,o.jsx)(`span`,{children:`JSON`})]}),(0,o.jsxs)(`label`,{className:`format-option`,children:[(0,o.jsx)(`input`,{type:`radio`,value:`csv`,checked:l===`csv`,onChange:()=>u(`csv`)}),(0,o.jsx)(`span`,{children:`CSV`})]})]})]}),(0,o.jsxs)(`div`,{className:`template-download`,children:[(0,o.jsxs)(`button`,{className:`btn-download-template`,onClick:x,children:[`📥 Download `,l.toUpperCase(),` Template`]}),(0,o.jsx)(`p`,{className:`template-hint`,children:`Download a sample template to see the correct format`})]}),(0,o.jsxs)(`div`,{className:`file-upload`,children:[(0,o.jsx)(`input`,{type:`file`,accept:l===`json`?`.json`:`.csv`,onChange:y,id:`bulk-file-input`,className:`file-input`}),(0,o.jsx)(`label`,{htmlFor:`bulk-file-input`,className:`file-label`,children:d?d.name:`Choose ${l.toUpperCase()} file`})]}),(0,o.jsxs)(`div`,{className:`format-help`,children:[(0,o.jsx)(`h3`,{children:`Format Guide:`}),l===`json`?(0,o.jsx)(`pre`,{children:`[
+  {
+    "type": "qa",
+    "category": "coding",
+    "title": "What is closure?",
+    "question": "Explain closures in JS",
+    "answer": "A closure is...",
+    "tags": ["javascript", "concept"],
+    "language": "javascript"
+  },
+  {
+    "type": "coding",
+    "category": "algorithms",
+    "title": "Two Sum",
+    "problem": "Find two numbers that add up...",
+    "solution": "Use hashmap...",
+    "tags": ["arrays", "hashmap"],
+    "language": "python"
+  }
+]`}):(0,o.jsx)(`pre`,{children:`type,category,title,question,answer,tags,language
+qa,coding,What is closure?,Explain closures,A closure is...,javascript|concept,javascript
+coding,algorithms,Two Sum,Find two numbers...,Use hashmap...,arrays|hashmap,python`})]}),_&&(0,o.jsx)(`div`,{className:`bulk-error`,children:_}),(0,o.jsxs)(`div`,{className:`bulk-actions`,children:[(0,o.jsx)(`button`,{className:`btn-cancel`,onClick:e,children:`Cancel`}),(0,o.jsx)(`button`,{className:`btn-upload`,onClick:b,disabled:!d||p,children:p?`Uploading...`:`Upload`})]})]})})]})})}export{l as BulkImport};
