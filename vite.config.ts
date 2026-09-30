@@ -1,26 +1,34 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   base: '/DevNotes/',
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.ts',
+    css: true,
+  },
   build: {
     rollupOptions: {
       output: {
         manualChunks(id) {
-          // Separate React and React Router into their own chunk
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
-              return 'vendor-react';
-            }
-            // Other node_modules into vendor chunk
-            return 'vendor';
+          if (!id.includes('node_modules')) return;
+
+          if (id.includes('@uiw/react-codemirror') || id.includes('@codemirror') || id.includes('react-markdown') || id.includes('remark-gfm')) {
+            return 'editor-vendor';
           }
+
+          if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+            return 'vendor-react';
+          }
+
+          return 'vendor';
         },
       },
     },
-    // Increase chunk size warning limit
     chunkSizeWarningLimit: 600,
   },
 })

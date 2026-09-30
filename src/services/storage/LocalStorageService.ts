@@ -36,9 +36,22 @@ export class LocalStorageService implements IStorageService {
     });
   }
 
-  private getFromStorage<T>(key: string): T[] {
+  private getStorage(): Storage | null {
+    if (typeof window === 'undefined') return null;
+
     try {
-      const data = localStorage.getItem(key);
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  private getFromStorage<T>(key: string): T[] {
+    const storage = this.getStorage();
+    if (!storage) return [];
+
+    try {
+      const data = storage.getItem(key);
       return data ? JSON.parse(data) : [];
     } catch (error) {
       console.error(`Error reading from localStorage (${key}):`, error);
@@ -47,8 +60,13 @@ export class LocalStorageService implements IStorageService {
   }
 
   private saveToStorage<T>(key: string, data: T[]): void {
+    const storage = this.getStorage();
+    if (!storage) {
+      throw new Error('Browser storage is unavailable');
+    }
+
     try {
-      localStorage.setItem(key, JSON.stringify(data));
+      storage.setItem(key, JSON.stringify(data));
     } catch (error) {
       console.error(`Error writing to localStorage (${key}):`, error);
       throw new Error('Storage quota exceeded or localStorage unavailable');
@@ -163,7 +181,9 @@ export class LocalStorageService implements IStorageService {
   }
 
   async clear(): Promise<void> {
-    localStorage.removeItem(STORAGE_KEYS.NOTES);
-    localStorage.removeItem(STORAGE_KEYS.FOLDERS);
+    const storage = this.getStorage();
+    if (!storage) return;
+    storage.removeItem(STORAGE_KEYS.NOTES);
+    storage.removeItem(STORAGE_KEYS.FOLDERS);
   }
 }

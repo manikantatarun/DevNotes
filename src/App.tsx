@@ -1,15 +1,14 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { AuthProvider } from './context/AuthContext';
-import { AuthButton } from './components/common/AuthButton';
 import './App.css'
 
-// Lazy load the main component
+const AuthButton = lazy(() => import('./components/common/AuthButton').then(module => ({ default: module.AuthButton })));
 const NotesList = lazy(() => import('./components/features/NotesList').then(module => ({ default: module.NotesList })));
 
 function App() {
   return (
-    <BrowserRouter basename="/DevNotes">
+    <BrowserRouter basename={import.meta.env.BASE_URL || '/'}>
       <AuthProvider>
         <div className="app-container">
           <Header />
@@ -44,7 +43,9 @@ function Header() {
         </div>
         <p>Your coding notes, organized</p>
       </div>
-      <AuthButton />
+      <Suspense fallback={<span className="app-auth-loading">Authenticating...</span>}>
+        <AuthButton />
+      </Suspense>
     </header>
   );
 }
