@@ -43,7 +43,8 @@ export function NoteViewer({
   });
 
   const handleShare = async () => {
-    const url = `${window.location.origin}/DevNotes/note/${note.id}`;
+    const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+    const url = `${window.location.origin}${basePath}/note/${note.id}`;
     try {
       await navigator.clipboard.writeText(url);
       setShowCopyFeedback(true);

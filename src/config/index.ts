@@ -75,7 +75,7 @@ const DEFAULT_REPO = {
 const DEFAULT_CONFIG = {
   workerUrl: 'https://devnotes.manikanta-tarun.workers.dev',
   githubClientId: 'Iv23lim4G6FNdDuTf6o6',
-  appBaseUrl: 'https://manikantatarun.github.io/DevNotes',
+  appBaseUrl: 'https://devnotes.manikantatarun.online',
 } as const;
 
 /**
@@ -89,9 +89,11 @@ export const GITHUB_CONFIG = {
   dataRepoName: import.meta.env.VITE_DATA_REPO_NAME ?? DEFAULT_REPO.name,
   dataRepoBranch: import.meta.env.VITE_DATA_REPO_BRANCH ?? DEFAULT_REPO.branch,
   
-  // Derives the redirect URI from the current page origin if env is not set
+  // Prefer explicit env, then current origin for custom domains, then fallback
   get appBaseUrl() {
-    return import.meta.env.VITE_APP_BASE_URL ?? DEFAULT_CONFIG.appBaseUrl;
+    if (import.meta.env.VITE_APP_BASE_URL) return import.meta.env.VITE_APP_BASE_URL;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return DEFAULT_CONFIG.appBaseUrl;
   },
 } as const;
 

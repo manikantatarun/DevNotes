@@ -21,7 +21,11 @@
     <script>
       // Store the path in sessionStorage to be redirected after loading
       sessionStorage.setItem('redirect', location.href.split(location.origin)[1]);
-      location.replace('/DevNotes/');
+
+      // Support both root-domain deploys (/) and project-path deploys (/DevNotes/)
+      var parts = location.pathname.split('/').filter(Boolean);
+      var candidateBase = parts.length > 0 && parts[0].toLowerCase() === 'devnotes' ? '/DevNotes/' : '/';
+      location.replace(candidateBase);
     </script>
   </head>
   <body>
