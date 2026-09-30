@@ -92,9 +92,21 @@ vi.mock('../components/features/NoteCard', () => ({
 }));
 
 vi.mock('../components/features/NoteViewer', () => ({
-  NoteViewer: ({ note, onClose }: { note: Note; onClose: () => void }) => (
+  NoteViewer: ({
+    note,
+    onClose,
+    onNext,
+    onPrevious,
+  }: {
+    note: Note;
+    onClose: () => void;
+    onNext?: () => void;
+    onPrevious?: () => void;
+  }) => (
     <div>
       <h3>{note.title}</h3>
+      <button onClick={onPrevious}>prev-note</button>
+      <button onClick={onNext}>next-note</button>
       <button onClick={onClose}>close-viewer</button>
     </div>
   ),
@@ -181,4 +193,5 @@ describe('NotesList filtering integration', () => {
       expect(screen.getAllByTestId('note-card')).toHaveLength(3);
     });
   });
+
 });
